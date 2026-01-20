@@ -1,12 +1,14 @@
 import React from "react";
 import type { AdsSummaryResponse } from "../types";
+import { AdvertisersTable } from "./AdvertisersTable";
+import { DistributionBar } from "./DistributionBar";
 
 type Props = {
   data: AdsSummaryResponse;
 };
 
 export function AdsSummaryCard({ data }: Props) {
-  const { domain, summary } = data;
+  const { domain, summary, distribution, advertisers } = data;
 
   return (
     <div style={{ padding: "12px" }}>
@@ -30,6 +32,12 @@ export function AdsSummaryCard({ data }: Props) {
           <strong>Primary advertiser:</strong>{" "}
           {summary.primary_advertiser}
         </p>
+      )}
+
+      {distribution && <DistributionBar distribution={distribution} />}
+
+      {advertisers.length > 0 && (
+        <AdvertisersTable advertisers={advertisers} />
       )}
     </div>
   );
