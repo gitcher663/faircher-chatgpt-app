@@ -5,7 +5,6 @@ export function transformUpstreamPayload(
   payload: UpstreamAdsPayload,
   domain: string
 ): AdsSummaryResponse {
-  // TODO: Map upstream fields to AdsSummaryResponse.
   return {
     domain,
     summary: {
@@ -21,6 +20,9 @@ export function transformUpstreamPayload(
     metadata: {
       data_window: "",
       source: "google_ads_transparency"
+    },
+    _meta: {
+      "openai/outputTemplate": "ui/dist/index.html"
     }
   };
 }
