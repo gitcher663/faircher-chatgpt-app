@@ -4,7 +4,7 @@ import { fetchUpstreamAds } from "./upstream";
 import { transformUpstreamPayload } from "./transform";
 
 export const toolDefinition = {
-  name: "faircher_ads_summary",
+  name: "faircher_domain_ads_summary",
   description: "Summarize advertising activity for a domain",
   inputSchema: {
     type: "object",
