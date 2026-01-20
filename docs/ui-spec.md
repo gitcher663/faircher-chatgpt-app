@@ -3,6 +3,7 @@
 ## Purpose
 
 The UI is a standalone Vite + React application rendered inside ChatGPT.
+
 It is responsible only for presenting the advertising summary returned by the MCP server.
 
 All business logic and data aggregation are handled server-side.
@@ -13,8 +14,7 @@ All business logic and data aggregation are handled server-side.
 
 The UI MUST consume data exclusively from:
 
-window.openai.toolOutput
-
+`window.openai.toolOutput`
 
 The tool output conforms to the `faircher_domain_ads_summary` schema.
 
@@ -62,6 +62,8 @@ type AdsSummaryOutput = {
     source: string;
   };
 };
+```
+
 ---
 
 ## Rendering Rules
@@ -69,6 +71,7 @@ type AdsSummaryOutput = {
 ### Empty State
 
 If `summary.is_running_ads === false`:
+
 - Render `<EmptyState />`
 - Render no other components
 
@@ -77,6 +80,7 @@ If `summary.is_running_ads === false`:
 ### Summary
 
 When ads are present:
+
 - Render `<AdsSummaryCard />`
 - Display:
   - domain
@@ -90,6 +94,7 @@ When ads are present:
 ### Distribution
 
 Render `<DistributionBar />` only when `distribution` is non-null.
+
 - Show counts by format
 - Omit formats not present
 
@@ -98,6 +103,36 @@ Render `<DistributionBar />` only when `distribution` is non-null.
 ### Advertisers
 
 Render `<AdvertisersTable />` when advertisers exist.
+
 - Sort by `ad_count_estimate` descending
 - Visually indicate `is_primary === true`
 
+---
+
+## UI State
+
+The UI MAY store ephemeral UI state (expanded sections, sort toggles) using:
+
+```
+window.openai.widgetState
+window.openai.setWidgetState()
+```
+
+Business data MUST NOT be stored in widget state.
+
+---
+
+## Visual Design Guidelines
+
+- Use system fonts only
+- Clear vertical hierarchy
+- Optimized for inline display
+- No nested scrolling
+- No dashboards or multi-tab layouts
+
+---
+
+## Accessibility Requirements
+
+- WCAG AA color contrast
+- Semantic HTML wh
