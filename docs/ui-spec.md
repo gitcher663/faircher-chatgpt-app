@@ -62,95 +62,42 @@ type AdsSummaryOutput = {
     source: string;
   };
 };
-Rendering Rules
-Empty State
-If summary.is_running_ads === false:
+---
 
-Render <EmptyState />
+## Rendering Rules
 
-Render no other components
+### Empty State
 
-Summary
+If `summary.is_running_ads === false`:
+- Render `<EmptyState />`
+- Render no other components
+
+---
+
+### Summary
+
 When ads are present:
+- Render `<AdsSummaryCard />`
+- Display:
+  - domain
+  - total ads
+  - active advertisers
+  - primary advertiser
+  - confidence indicator
 
-Render <AdsSummaryCard />
+---
 
-Display:
+### Distribution
 
-domain
+Render `<DistributionBar />` only when `distribution` is non-null.
+- Show counts by format
+- Omit formats not present
 
-total ads
+---
 
-active advertisers
+### Advertisers
 
-primary advertiser
+Render `<AdvertisersTable />` when advertisers exist.
+- Sort by `ad_count_estimate` descending
+- Visually indicate `is_primary === true`
 
-confidence indicator
-
-Distribution
-Render <DistributionBar /> only when distribution is non-null.
-
-Show counts by format
-
-Omit formats not present
-
-Advertisers
-Render <AdvertisersTable /> when advertisers exist.
-
-Sort by ad_count_estimate descending
-
-Visually indicate is_primary === true
-
-UI State
-The UI MAY store ephemeral UI state (expanded sections, sort toggles) using:
-
-window.openai.widgetState
-window.openai.setWidgetState()
-Business data MUST NOT be stored in widget state.
-
-Visual Design Guidelines
-Use system fonts only
-
-Clear vertical hierarchy
-
-Optimized for inline display
-
-No nested scrolling
-
-No dashboards or multi-tab layouts
-
-Accessibility Requirements
-WCAG AA color contrast
-
-Semantic HTML where possible
-
-Text alternatives for visual indicators
-
-Usable with increased text size
-
-Non-Goals
-The UI MUST NOT:
-
-Display creative-level ads
-
-Show images or videos
-
-Link externally to ad platforms
-
-Replicate FairCher dashboards
-
-The UI exists to summarize, not explore.
-
-FINAL CHECKS BEFORE COMMIT:
-
-File contains no HTML entities like < or >
-
-JSX appears as literal text (e.g. <EmptyState />)
-
-Markdown renders cleanly
-
-No additional changes outside this file
-
-COMMIT MESSAGE:
-"Finalize authoritative UI specification for FairCher Ads Summary"
-```
