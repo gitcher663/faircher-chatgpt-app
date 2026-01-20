@@ -1,15 +1,17 @@
-# UI Spec
+# UI Spec — FairCher Ads Summary
 
-The UI is a standalone Vite + React application that renders the ads summary
-returned by the MCP server.
+## Purpose
 
-## Requirements
+The UI is a standalone Vite + React application rendered inside ChatGPT.
+It is responsible **only for presentation**, not data fetching or business logic.
 
-- Consume data from `window.openai.toolOutput`.
-- Display summary, distribution, and advertiser details.
-- Provide an empty state when no ads are detected.
+All authoritative data is provided by the MCP server.
 
-## TODO
+---
 
-- Add visual design guidelines (typography, spacing, color palette).
-- Include accessibility requirements.
+## Data Source (Authoritative)
+
+The UI MUST consume data exclusively from:
+
+```ts
+window.openai.toolOutput
