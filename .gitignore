@@ -7,6 +7,8 @@ yarn-error.log*
 # Build output
 dist/
 build/
+!server/ui/dist/
+!server/ui/dist/.gitkeep
 
 # Environment variables
 .env
