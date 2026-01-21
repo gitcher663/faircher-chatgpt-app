@@ -1,18 +1,18 @@
 export type UpstreamAdsPayload = {
-  search_metadata: {
-    status: string;
-    request_url: string;
+  search_metadata?: {
+    status?: string;
+    request_url?: string;
   };
-  search_parameters: {
-    engine: string;
+  search_parameters?: {
+    engine?: string;
     domain?: string;
     advertiser_id?: string;
     time_period?: string;
   };
-  search_information: {
-    total_results: number;
+  search_information?: {
+    total_results?: number;
   };
-  ad_creatives: Array<{
+  ad_creatives?: Array<{
     id: string;
     format: "text" | "image" | "video";
     first_shown_datetime: string;
@@ -32,6 +32,10 @@ type FetchArgs = {
 };
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
+
+function normalizeStatus(status?: string): string {
+  return (status ?? "").trim().toLowerCase();
+}
 
 export async function fetchUpstreamAds(
   args: FetchArgs
@@ -62,8 +66,25 @@ export async function fetchUpstreamAds(
 
   const json = (await response.json()) as UpstreamAdsPayload;
 
-  if (json.search_metadata?.status !== "Success") {
-    throw new Error("SearchAPI returned non-success status");
+  // 🔴 HARDEN STATUS CHECK
+  const status = normalizeStatus(json.search_metadata?.status);
+
+  if (status && status !== "success") {
+    throw new Error(
+      `SearchAPI returned non-success status: ${json.search_metadata?.status}`
+    );
+  }
+
+  // 🔴 GUARANTEE ad_creatives IS ALWAYS AN ARRAY
+  if (!Array.isArray(json.ad_creatives)) {
+    json.ad_creatives = [];
+  }
+
+  // 🔴 FINAL SANITY CHECK
+  if (!json.search_metadata && json.ad_creatives.length === 0) {
+    throw new Error(
+      "SearchAPI payload missing expected fields (no metadata, no ads)"
+    );
   }
 
   return json;
