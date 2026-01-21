@@ -1,7 +1,6 @@
 {
   "name": "faircher-mcp-server",
   "private": true,
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
