@@ -2,19 +2,26 @@ import { differenceInDays, parseISO } from "date-fns";
 import type { UpstreamAdsPayload } from "./upstream";
 
 type UpstreamAd = {
-  advertiser_name?: string;
-  advertiser_id?: string;
-  ad_format?: "text" | "image" | "video";
-  first_seen?: string;
-  last_seen?: string;
+  advertiser_name: string;
+  advertiser_id: string;
+  ad_format: "text" | "image" | "video";
+  first_seen: string;
+  last_seen: string;
 };
 
 export function transformUpstreamPayload(
   domain: string,
   upstream: UpstreamAdsPayload
 ) {
-  const ads: UpstreamAd[] = Array.isArray((upstream as any)?.ads)
-    ? (upstream as any).ads
+  // 🔴 FIX: Read the correct field from SearchAPI
+  const ads: UpstreamAd[] = Array.isArray(upstream.ad_creatives)
+    ? upstream.ad_creatives.map(ad => ({
+        advertiser_name: ad.advertiser?.name ?? "Unknown Advertiser",
+        advertiser_id: ad.advertiser?.id ?? "unknown",
+        ad_format: ad.format,
+        first_seen: ad.first_shown_datetime,
+        last_seen: ad.last_shown_datetime,
+      }))
     : [];
 
   // Early exit — no ads
@@ -53,25 +60,19 @@ export function transformUpstreamPayload(
   const lastSeenDates: Date[] = [];
 
   for (const ad of ads) {
-    const advertiserId = ad.advertiser_id || "unknown";
-    const advertiserName = ad.advertiser_name || "Unknown Advertiser";
-
-    if (!advertiserMap.has(advertiserId)) {
-      advertiserMap.set(advertiserId, {
-        name: advertiserName,
-        advertiser_id: advertiserId,
+    if (!advertiserMap.has(ad.advertiser_id)) {
+      advertiserMap.set(ad.advertiser_id, {
+        name: ad.advertiser_name,
+        advertiser_id: ad.advertiser_id,
         count: 0,
       });
     }
 
-    advertiserMap.get(advertiserId)!.count += 1;
+    advertiserMap.get(ad.advertiser_id)!.count += 1;
+    formats[ad.ad_format] += 1;
 
-    if (ad.ad_format && formats[ad.ad_format] !== undefined) {
-      formats[ad.ad_format] += 1;
-    }
-
-    if (ad.first_seen) firstSeenDates.push(parseISO(ad.first_seen));
-    if (ad.last_seen) lastSeenDates.push(parseISO(ad.last_seen));
+    firstSeenDates.push(parseISO(ad.first_seen));
+    lastSeenDates.push(parseISO(ad.last_seen));
   }
 
   const advertisersSorted = Array.from(advertiserMap.values()).sort(
@@ -80,25 +81,16 @@ export function transformUpstreamPayload(
 
   const primaryAdvertiser = advertisersSorted[0] ?? null;
 
-  const firstSeen =
-    firstSeenDates.length > 0
-      ? new Date(Math.min(...firstSeenDates.map(d => d.getTime())))
-      : null;
+  const firstSeen = new Date(
+    Math.min(...firstSeenDates.map(d => d.getTime()))
+  );
 
-  const lastSeen =
-    lastSeenDates.length > 0
-      ? new Date(Math.max(...lastSeenDates.map(d => d.getTime())))
-      : null;
+  const lastSeen = new Date(
+    Math.max(...lastSeenDates.map(d => d.getTime()))
+  );
 
-  const lifespanDays =
-    firstSeen && lastSeen
-      ? differenceInDays(lastSeen, firstSeen)
-      : 0;
-
-  const isRecent =
-    lastSeen
-      ? differenceInDays(new Date(), lastSeen) <= 7
-      : false;
+  const lifespanDays = differenceInDays(lastSeen, firstSeen);
+  const isRecent = differenceInDays(new Date(), lastSeen) <= 7;
 
   return {
     domain,
@@ -109,19 +101,15 @@ export function transformUpstreamPayload(
       primary_advertiser: primaryAdvertiser?.name || null,
       confidence: Math.min(1, ads.length / 20),
     },
-    activity:
-      firstSeen && lastSeen
-        ? {
-            first_seen: firstSeen.toISOString(),
-            last_seen: lastSeen.toISOString(),
-            is_recent: isRecent,
-            ad_lifespan_days: lifespanDays,
-          }
-        : null,
-    distribution:
-      formats.text || formats.image || formats.video
-        ? { formats }
-        : null,
+    activity: {
+      first_seen: firstSeen.toISOString(),
+      last_seen: lastSeen.toISOString(),
+      is_recent: isRecent,
+      ad_lifespan_days: lifespanDays,
+    },
+    distribution: {
+      formats,
+    },
     advertisers: advertisersSorted.map(a => ({
       name: a.name,
       advertiser_id: a.advertiser_id,
