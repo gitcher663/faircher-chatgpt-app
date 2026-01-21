@@ -67,22 +67,26 @@ export function registerFairCherTool(): ToolRegistry {
       const domain = String(args?.domain || "");
       const normalizedDomain = normalizeDomain(domain);
 
-      // 2. Fetch upstream data
+      // 2. Fetch upstream data (SearchAPI / FairCher backend)
       const upstream = await fetchUpstreamAds({ domain: normalizedDomain });
 
-      // 3. Transform into your canonical summary schema
+      // 3. Transform into canonical summary schema
       const data = transformUpstreamPayload(normalizedDomain, upstream);
 
       // 4. Generate a robust natural-language summary
-      let summaryText: string;
+      let summaryText: string | null = null;
 
-      if (!data.summary.is_running_ads) {
+      if (!data?.summary) {
+        summaryText =
+          `Advertising data was retrieved for ${normalizedDomain}, ` +
+          `but could not be summarized due to an unexpected data shape.`;
+      } else if (!data.summary.is_running_ads) {
         summaryText =
           `No advertising activity was detected for ${data.domain} ` +
           `in the last 30 days.`;
       } else {
         const advertiserList =
-          data.advertisers.length > 0
+          Array.isArray(data.advertisers) && data.advertisers.length > 0
             ? data.advertisers
                 .slice(0, 3)
                 .map(a => a.name)
@@ -106,12 +110,11 @@ export function registerFairCherTool(): ToolRegistry {
           `Top advertisers include: ${advertiserList}.`;
       }
 
-      /**
-       * IMPORTANT:
-       * - `content` is REQUIRED for MCP
-       * - structuredContent is OPTIONAL and ignored unless content exists
-       * - Keeping structuredContent lets you re-enable the UI later
-       */
+      // 🔒 HARD MCP INVARIANT — NEVER return empty / non-string text
+      if (!summaryText || typeof summaryText !== "string") {
+        throw new Error("Invariant violation: summaryText must be a non-empty string");
+      }
+
       return {
         content: [
           {
@@ -130,7 +133,7 @@ export function registerFairCherTool(): ToolRegistry {
     } catch (err: any) {
       // 5. Defensive error handling — NEVER return raw errors
       return mcpText(
-        `Unable to retrieve advertising data. ` +
+        `Unable to retrieve advertising data for the requested domain. ` +
         `Reason: ${err?.message ?? "Unknown error."}`
       );
     }
