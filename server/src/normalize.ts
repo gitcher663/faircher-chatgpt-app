@@ -7,7 +7,6 @@ export function normalizeDomain(input: string): string {
     throw new ValidationError("Domain is required.");
   }
 
-  // Strip protocol and trailing slash
   return trimmed
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
