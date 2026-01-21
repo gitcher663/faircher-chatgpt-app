@@ -1,17 +1,21 @@
 import express from "express";
 import path from "path";
 import { registerFairCherTool, type ToolRegistry } from "./tool";
+import { registerFairCherLandingPageTool } from "./tool_landing_page";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // -----------------------------
-// Tool registry
+// Tool registry (MULTI-TOOL)
 // -----------------------------
-const tools: ToolRegistry = registerFairCherTool();
+const tools: ToolRegistry = {
+  ...registerFairCherTool(),              // domain-as-advertiser
+  ...registerFairCherLandingPageTool(),    // landing-page attribution
+};
 
 // -----------------------------
-// UI hosting (required for outputTemplate url)
+// UI hosting (optional, safe)
 // -----------------------------
 const uiDistPath = path.join(__dirname, "../ui/dist");
 
@@ -21,7 +25,7 @@ app.get("/ui/faircher-ads-summary", (_req, res) => {
   res.sendFile(path.join(uiDistPath, "index.html"));
 });
 
-// Optional: root helpful response
+// Root info
 app.get("/", (_req, res) => {
   res
     .status(200)
@@ -30,7 +34,7 @@ app.get("/", (_req, res) => {
     );
 });
 
-// Health endpoint
+// Health check
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
@@ -49,7 +53,7 @@ app.post("/", async (req, res) => {
     return res.json({
       jsonrpc: "2.0",
       id,
-      result
+      result,
     });
   }
 
@@ -58,7 +62,7 @@ app.post("/", async (req, res) => {
     return res.json({
       jsonrpc: "2.0",
       id,
-      error: { code, message, data }
+      error: { code, message, data },
     });
   }
 
@@ -79,7 +83,7 @@ app.post("/", async (req, res) => {
       return reply({
         protocolVersion: clientProtocolVersion,
         serverInfo: { name: "faircher-mcp", version: "1.0.0" },
-        capabilities: { tools: {} }
+        capabilities: { tools: {} },
       });
     }
 
@@ -93,12 +97,12 @@ app.post("/", async (req, res) => {
     // -----------------------------
     if (method === "tools/list") {
       return reply({
-        tools: Object.values(tools).map((t) => t.definition)
+        tools: Object.values(tools).map(t => t.definition),
       });
     }
 
     // -----------------------------
-    // MCP: tools/call  ✅ FIX IS HERE
+    // MCP: tools/call
     // -----------------------------
     if (method === "tools/call") {
       const name = params?.name;
@@ -115,23 +119,21 @@ app.post("/", async (req, res) => {
 
       const toolResult = await tool.run(args ?? {});
 
-      // 🔴 CRITICAL FIX:
-      // Tool output MUST be wrapped in result.toolResult
+      // CRITICAL: MCP expects toolResult wrapper
       return reply({
-        toolResult
+        toolResult,
       });
     }
 
     return rpcError(-32601, `Method not found: ${method}`);
   } catch (e: any) {
     return rpcError(-32000, "Server error", {
-      message: e?.message ?? String(e)
+      message: e?.message ?? String(e),
     });
   }
 });
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`faircher-mcp listening on :${port}`);
 });
