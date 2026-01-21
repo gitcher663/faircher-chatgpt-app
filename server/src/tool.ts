@@ -1,5 +1,4 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server";
-import type { AdsSummaryResponse } from "./types";
 import { normalizeDomain } from "./normalize";
 import { fetchUpstreamAds } from "./upstream";
 import { transformUpstreamPayload } from "./transform";
@@ -44,19 +43,22 @@ export function registerFairCherTool(server: McpServer) {
           "Advertising activity analyzed.",
       },
     },
-    async ({ domain }): Promise<AdsSummaryResponse> => {
+    async ({ domain }) => {
       const normalizedDomain = normalizeDomain(domain);
+
       const upstreamPayload = await fetchUpstreamAds({
         domain: normalizedDomain,
       });
 
+      const data = transformUpstreamPayload(
+        normalizedDomain,
+        upstreamPayload
+      );
+
       return {
         structuredContent: {
           type: "faircherAdsSummary",
-          data: transformUpstreamPayload(
-            upstreamPayload,
-            normalizedDomain
-          ),
+          data,
         },
         _meta: {
           "openai/outputTemplate": "faircher-ads-summary",
