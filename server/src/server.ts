@@ -8,6 +8,6 @@ const server = new Server({
 
 registerFairCherTool(server);
 
-server.start({
+server.listen({
   port: Number(process.env.PORT) || 3000,
 });
