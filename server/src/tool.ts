@@ -1,26 +1,20 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server";
-import { normalizeDomain } from "./normalize";
-import { fetchUpstreamAds } from "./upstream";
-import { transformUpstreamPayload } from "./transform";
+import { Server } from "@modelcontextprotocol/sdk/server";
+import { normalizeDomain } from "./normalize.js";
+import { fetchUpstreamAds } from "./upstream.js";
+import { transformUpstreamPayload } from "./transform.js";
 
-/**
- * Registers the FairCher Ads Summary tool with the MCP server.
- * This is what makes ChatGPT aware the tool exists.
- */
-export function registerFairCherTool(server: McpServer) {
+export function registerFairCherTool(server: Server) {
   server.registerTool(
     "faircher_domain_ads_summary",
     {
       title: "Advertising activity summary",
       description:
-        "Use this when you want a summarized view of advertising activity for a company or domain, including ad presence, advertisers, and ad formats.",
+        "Summarized advertising activity for a domain: presence, advertisers, and formats.",
       inputSchema: {
         type: "object",
         properties: {
           domain: {
             type: "string",
-            description:
-              "A root domain like example.com. URLs and subdomains will be normalized or rejected.",
           },
         },
         required: ["domain"],
@@ -37,22 +31,15 @@ export function registerFairCherTool(server: McpServer) {
           url: "/ui/faircher-ads-summary",
           mimeType: "text/html+skybridge",
         },
-        "openai/toolInvocation/invoking":
-          "Analyzing advertising activity…",
-        "openai/toolInvocation/invoked":
-          "Advertising activity analyzed.",
       },
     },
-    async ({ domain }) => {
+    async ({ domain }: { domain: string }) => {
       const normalizedDomain = normalizeDomain(domain);
-
-      const upstreamPayload = await fetchUpstreamAds({
-        domain: normalizedDomain,
-      });
+      const upstream = await fetchUpstreamAds({ domain: normalizedDomain });
 
       const data = transformUpstreamPayload(
         normalizedDomain,
-        upstreamPayload
+        upstream
       );
 
       return {
