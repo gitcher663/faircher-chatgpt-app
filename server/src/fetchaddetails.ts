@@ -13,6 +13,7 @@ export type AdInformation = {
   first_shown_date?: string;
   last_shown_date?: string;
   last_shown_datetime?: string;
+  audience_selection?: string[];
   regions?: AdRegion[];
 };
 

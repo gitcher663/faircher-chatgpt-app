@@ -1,6 +1,7 @@
 import { normalizeDomain } from "./normalize";
 import { fetchAdsByFormat } from "./fetchAdsByFormat";
 import { transformAdsByFormat } from "./transform_ads_by_format";
+import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
@@ -44,15 +45,16 @@ export function registerFairCherDisplayAdsTool() {
       const domain = normalizeDomain(rawDomain);
       const upstream = await fetchAdsByFormat({ domain, adFormat: "image" });
       const data = transformAdsByFormat(domain, "image", upstream, 10);
+      const enriched = await enrichAdsByFormatWithDetails(data);
 
       const summaryText =
-        data.total_creatives === 0
+        enriched.total_creatives === 0
           ? `No recent display ads were found for ${domain} in the last 30 days.`
-          : `Found ${data.total_creatives} recent display ads for ${domain} in the last 30 days.`;
+          : `Found ${enriched.total_creatives} recent display ads for ${domain} in the last 30 days.`;
 
       return {
         content: [{ type: "text", text: summaryText }],
-        structuredContent: data,
+        structuredContent: enriched,
       };
     } catch (err: any) {
       const message =
