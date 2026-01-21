@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 export type UpstreamAdsPayload = {
   search_metadata: {
     status: string;
@@ -48,23 +46,18 @@ export async function fetchUpstreamAds(
     engine: "google_ads_transparency_center",
     domain: args.domain,
     time_period: "last_30_days",
-    num: "100",
+    num: "100"
   });
 
-  const response = await fetch(
-    `${SEARCH_API_URL}?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+  const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`
     }
-  );
+  });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(
-      `SearchAPI request failed (${response.status}): ${text}`
-    );
+    throw new Error(`SearchAPI request failed (${response.status}): ${text}`);
   }
 
   const json = (await response.json()) as UpstreamAdsPayload;
