@@ -8,20 +8,22 @@ export type UpstreamAdsPayload = {
     domain?: string;
     advertiser_id?: string;
     time_period?: string;
+    ad_format?: "text" | "image" | "video";
   };
   search_information?: {
     total_results?: number;
   };
   ad_creatives?: Array<{
-    id: string;
-    format: "text" | "image" | "video";
-    first_shown_datetime: string;
-    last_shown_datetime: string;
-    advertiser: {
-      id: string;
-      name: string;
+    id?: string;
+    format?: "text" | "image" | "video";
+    first_shown_datetime?: string;
+    last_shown_datetime?: string;
+    advertiser?: {
+      id?: string;
+      name?: string;
     };
     target_domain?: string;
+    details_link?: string;
   }>;
   pagination?: {
     next_page_token?: string;

@@ -15,13 +15,21 @@ export function transformUpstreamPayload(
 ) {
   // 🔴 FIX: Read the correct field from SearchAPI
   const ads: UpstreamAd[] = Array.isArray(upstream.ad_creatives)
-    ? upstream.ad_creatives.map(ad => ({
-        advertiser_name: ad.advertiser?.name ?? "Unknown Advertiser",
-        advertiser_id: ad.advertiser?.id ?? "unknown",
-        ad_format: ad.format,
-        first_seen: ad.first_shown_datetime,
-        last_seen: ad.last_shown_datetime,
-      }))
+    ? upstream.ad_creatives.flatMap(ad => {
+        if (!ad.format || !ad.first_shown_datetime || !ad.last_shown_datetime) {
+          return [];
+        }
+
+        return [
+          {
+            advertiser_name: ad.advertiser?.name ?? "Unknown Advertiser",
+            advertiser_id: ad.advertiser?.id ?? "unknown",
+            ad_format: ad.format,
+            first_seen: ad.first_shown_datetime,
+            last_seen: ad.last_shown_datetime,
+          },
+        ];
+      })
     : [];
 
   // Early exit — no ads

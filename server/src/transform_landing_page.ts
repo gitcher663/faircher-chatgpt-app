@@ -1,13 +1,36 @@
 import { differenceInDays, parseISO } from "date-fns";
 import type { UpstreamAdsPayload } from "./upstream";
 
+type LandingAd = {
+  advertiser?: {
+    name?: string;
+  };
+  format: "text" | "image" | "video";
+  target_domain?: string;
+  first_shown_datetime: string;
+  last_shown_datetime: string;
+};
+
+function isLandingAd(ad: {
+  format?: "text" | "image" | "video";
+  target_domain?: string;
+  first_shown_datetime?: string;
+  last_shown_datetime?: string;
+}): ad is LandingAd {
+  return Boolean(
+    ad.format &&
+      ad.first_shown_datetime &&
+      ad.last_shown_datetime
+  );
+}
+
 export function transformLandingPagePayload(
   domain: string,
   upstream: UpstreamAdsPayload
 ) {
-  const ads = (upstream.ad_creatives ?? []).filter(
-    ad => ad.target_domain === domain
-  );
+  const ads = (upstream.ad_creatives ?? [])
+    .filter(isLandingAd)
+    .filter(ad => ad.target_domain === domain);
 
   if (ads.length === 0) {
     return {
@@ -35,9 +58,11 @@ export function transformLandingPagePayload(
   const lastSeen: Date[] = [];
 
   for (const ad of ads) {
+    const advertiserName = ad.advertiser?.name ?? "Unknown Advertiser";
+
     advertiserMap.set(
-      ad.advertiser.name,
-      (advertiserMap.get(ad.advertiser.name) ?? 0) + 1
+      advertiserName,
+      (advertiserMap.get(advertiserName) ?? 0) + 1
     );
 
     formats[ad.format] += 1;
@@ -54,7 +79,9 @@ export function transformLandingPagePayload(
     }))
     .sort((a, b) => b.ad_count_estimate - a.ad_count_estimate);
 
-  advertisers[0].is_primary = true;
+  if (advertisers[0]) {
+    advertisers[0].is_primary = true;
+  }
 
   const first = new Date(Math.min(...firstSeen.map(d => d.getTime())));
   const last = new Date(Math.max(...lastSeen.map(d => d.getTime())));

@@ -7,7 +7,7 @@ function buildErrorResult(domain: string | null, message: string) {
     content: [{ type: "text", text: message }],
     structuredContent: {
       domain: domain ?? "",
-      ad_format: "text",
+      ad_format: "image",
       total_creatives: 0,
       creatives: [],
       metadata: {
@@ -19,11 +19,11 @@ function buildErrorResult(domain: string | null, message: string) {
   };
 }
 
-export function registerFairCherSearchAdsTool() {
+export function registerFairCherDisplayAdsTool() {
   const definition = {
-    name: "faircher_search_ads",
+    name: "faircher_display_ads",
     description:
-      "Retrieve recent Google Search Ads (text ads) for a domain, including creative examples.",
+      "Retrieve recent Google Display Ads (image ads) for a domain, including creative examples.",
     inputSchema: {
       type: "object",
       properties: {
@@ -42,13 +42,13 @@ export function registerFairCherSearchAdsTool() {
 
     try {
       const domain = normalizeDomain(rawDomain);
-      const upstream = await fetchAdsByFormat({ domain, adFormat: "text" });
-      const data = transformAdsByFormat(domain, "text", upstream, 10);
+      const upstream = await fetchAdsByFormat({ domain, adFormat: "image" });
+      const data = transformAdsByFormat(domain, "image", upstream, 10);
 
       const summaryText =
         data.total_creatives === 0
-          ? `No recent search ads were found for ${domain} in the last 30 days.`
-          : `Found ${data.total_creatives} recent search ads for ${domain} in the last 30 days.`;
+          ? `No recent display ads were found for ${domain} in the last 30 days.`
+          : `Found ${data.total_creatives} recent display ads for ${domain} in the last 30 days.`;
 
       return {
         content: [{ type: "text", text: summaryText }],
@@ -56,7 +56,7 @@ export function registerFairCherSearchAdsTool() {
       };
     } catch (err: any) {
       const message =
-        `Unable to retrieve search ads. ` +
+        `Unable to retrieve display ads. ` +
         `Reason: ${err?.message ?? "Unknown error"}`;
       return buildErrorResult(rawDomain, message);
     }

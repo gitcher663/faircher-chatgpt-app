@@ -10,13 +10,31 @@ export type SearchAdCreative = {
   landing_domain?: string;
 };
 
+type SearchAd = {
+  id?: string;
+  advertiser?: {
+    id?: string;
+    name?: string;
+  };
+  target_domain?: string;
+  details_link?: string;
+  first_shown_datetime: string;
+  last_shown_datetime: string;
+};
+
+function hasDates(ad: { first_shown_datetime?: string; last_shown_datetime?: string }): ad is SearchAd {
+  return Boolean(ad.first_shown_datetime && ad.last_shown_datetime);
+}
+
 export function transformSearchAds(
   upstream: UpstreamAdsPayload,
   limit = 10
 ): SearchAdCreative[] {
-  if (!Array.isArray(upstream.ad_creatives)) return [];
+  const ads = Array.isArray(upstream.ad_creatives)
+    ? upstream.ad_creatives.filter(hasDates)
+    : [];
 
-  return upstream.ad_creatives
+  return ads
     .sort(
       (a, b) =>
         new Date(b.last_shown_datetime).getTime() -
@@ -24,9 +42,9 @@ export function transformSearchAds(
     )
     .slice(0, limit)
     .map(ad => ({
-      advertiser: ad.advertiser.name,
-      advertiser_id: ad.advertiser.id,
-      creative_id: ad.id,              // CRxxxxxxxxxxxx
+      advertiser: ad.advertiser?.name ?? "Unknown Advertiser",
+      advertiser_id: ad.advertiser?.id ?? "unknown",
+      creative_id: ad.id ?? "unknown",              // CRxxxxxxxxxxxx
       first_seen: ad.first_shown_datetime,
       last_seen: ad.last_shown_datetime,
       details_link: ad.details_link,
