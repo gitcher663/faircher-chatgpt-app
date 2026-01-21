@@ -1,11 +1,10 @@
-import React from "react";
 import type { Distribution } from "../types";
 
 type Props = {
   distribution: Distribution;
 };
 
-export function DistributionBar({ distribution }: Props) {
+export default function DistributionBar({ distribution }: Props) {
   const formats = distribution.formats;
   const max = Math.max(...Object.values(formats));
 
@@ -26,7 +25,7 @@ export function DistributionBar({ distribution }: Props) {
                 height: "6px",
                 width: `${width}%`,
                 backgroundColor: "#888",
-                borderRadius: "3px"
+                borderRadius: "3px",
               }}
             />
           </div>
