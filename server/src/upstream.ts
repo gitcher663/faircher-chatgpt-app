@@ -21,6 +21,7 @@ export type UpstreamAdsPayload = {
       id: string;
       name: string;
     };
+    target_domain?: string;
   }>;
   pagination?: {
     next_page_token?: string;
@@ -50,7 +51,8 @@ export async function fetchUpstreamAds(
     engine: "google_ads_transparency_center",
     domain: args.domain,
     time_period: "last_30_days",
-    num: "100"
+    num: "100",
+    region: "ANYWHERE"
   });
 
   const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
@@ -66,21 +68,17 @@ export async function fetchUpstreamAds(
 
   const json = (await response.json()) as UpstreamAdsPayload;
 
-  // 🔴 HARDEN STATUS CHECK
   const status = normalizeStatus(json.search_metadata?.status);
-
   if (status && status !== "success") {
     throw new Error(
       `SearchAPI returned non-success status: ${json.search_metadata?.status}`
     );
   }
 
-  // 🔴 GUARANTEE ad_creatives IS ALWAYS AN ARRAY
   if (!Array.isArray(json.ad_creatives)) {
     json.ad_creatives = [];
   }
 
-  // 🔴 FINAL SANITY CHECK
   if (!json.search_metadata && json.ad_creatives.length === 0) {
     throw new Error(
       "SearchAPI payload missing expected fields (no metadata, no ads)"
