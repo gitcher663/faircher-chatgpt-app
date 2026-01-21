@@ -1,4 +1,4 @@
-import { ValidationError } from "./errors";
+import { ValidationError } from "./errors.js";
 
 export function normalizeDomain(input: string): string {
   const trimmed = input.trim().toLowerCase();
@@ -7,6 +7,8 @@ export function normalizeDomain(input: string): string {
     throw new ValidationError("Domain is required.");
   }
 
-  // TODO: Add more robust domain parsing/validation.
-  return trimmed.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  // Strip protocol and trailing slash
+  return trimmed
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
 }
