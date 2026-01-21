@@ -1,11 +1,10 @@
-import React from "react";
 import type { Advertiser } from "../types";
 
 type Props = {
   advertisers: Advertiser[];
 };
 
-export function AdvertisersTable({ advertisers }: Props) {
+export default function AdvertisersTable({ advertisers }: Props) {
   return (
     <div style={{ marginTop: "12px" }}>
       <h4>Advertisers</h4>
