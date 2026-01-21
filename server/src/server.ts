@@ -1,7 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server";
-import { registerFairCherTool } from "./tool";
+import { Server } from "@modelcontextprotocol/sdk/server";
+import { registerFairCherTool } from "./tool.js";
 
-const server = new McpServer({
+const server = new Server({
   name: "faircher-mcp",
   version: "1.0.0",
 });
