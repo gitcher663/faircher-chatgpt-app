@@ -20,16 +20,22 @@ export async function fetchAdsByFormat(
   const apiKey = process.env.UPSTREAM_API_KEY;
   if (!apiKey) throw new Error("Missing UPSTREAM_API_KEY");
 
+  const adFormat = args.adFormat;
+  if (!["text", "image", "video"].includes(adFormat)) {
+    throw new Error(`Invalid ad_format: ${adFormat}`);
+  }
+
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
     domain: args.domain,
     time_period: "last_30_days",
-    ad_format: args.adFormat,
+    ad_format: adFormat,
     num: String(args.num ?? 40),
     region: "ANYWHERE",
   });
 
-  const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
+  const requestUrl = `${SEARCH_API_URL}?${params.toString()}`;
+  const response = await fetch(requestUrl, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -43,6 +49,12 @@ export async function fetchAdsByFormat(
   }
 
   const json = (await response.json()) as UpstreamAdsPayload;
+  const upstreamFormat = json.search_parameters?.ad_format;
+  if (upstreamFormat && upstreamFormat !== adFormat) {
+    throw new Error(
+      `SearchAPI ad_format mismatch: requested ${adFormat}, received ${upstreamFormat} (request: ${requestUrl})`
+    );
+  }
 
   const status = normalizeStatus(json.search_metadata?.status);
   if (status && status !== "success") {
