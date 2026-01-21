@@ -122,10 +122,7 @@ export function registerFairCherTool(): ToolRegistry {
             text: summaryText
           }
         ],
-        structuredContent: {
-          type: "faircherAdsSummary",
-          data
-        },
+        structuredContent: data,
         _meta: {
           "openai/outputTemplate": "faircher-ads-summary"
         }

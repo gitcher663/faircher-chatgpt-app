@@ -61,10 +61,7 @@ export function registerFairCherLandingPageTool() {
             text: summaryText,
           },
         ],
-        structuredContent: {
-          type: "faircherLandingPageAdsSummary",
-          data,
-        },
+        structuredContent: data,
       };
     } catch (err: any) {
       return mcpText(
