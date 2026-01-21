@@ -1,45 +1,23 @@
-import type { AdsSummaryResponse } from "../types";
-import AdvertisersTable from "./AdvertisersTable";
-import DistributionBar from "./DistributionBar";
+import type { Advertiser } from "../types";
 
 type Props = {
-  data: AdsSummaryResponse;
+  advertisers: Advertiser[];
 };
 
-export default function AdsSummaryCard({ data }: Props) {
-  const { domain, summary, distribution, advertisers } = data;
-
+export default function AdvertisersTable({ advertisers }: Props) {
   return (
-    <div style={{ padding: "12px" }}>
-      <h3>{domain}</h3>
+    <div style={{ marginTop: "12px" }}>
+      <h4>Advertisers</h4>
 
-      <p>
-        <strong>Status:</strong>{" "}
-        {summary.is_running_ads ? "Running ads" : "No ads detected"}
-      </p>
-
-      <p>
-        <strong>Total ads found:</strong> {summary.total_ads_found}
-      </p>
-
-      <p>
-        <strong>Active advertisers:</strong> {summary.active_advertisers}
-      </p>
-
-      {summary.primary_advertiser && (
-        <p>
-          <strong>Primary advertiser:</strong>{" "}
-          {summary.primary_advertiser}
-        </p>
-      )}
-
-      {distribution && (
-        <DistributionBar distribution={distribution} />
-      )}
-
-      {advertisers.length > 0 && (
-        <AdvertisersTable advertisers={advertisers} />
-      )}
+      <ul style={{ paddingLeft: "16px" }}>
+        {advertisers.map((adv) => (
+          <li key={adv.advertiser_id}>
+            <strong>{adv.name}</strong>{" "}
+            {adv.is_primary && "(primary)"} —{" "}
+            {adv.ad_count_estimate} ads
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
