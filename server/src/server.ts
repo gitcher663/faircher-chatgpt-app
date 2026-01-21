@@ -1,7 +1,9 @@
 import express from "express";
 import path from "path";
+
 import { registerFairCherTool, type ToolRegistry } from "./tool";
 import { registerFairCherLandingPageTool } from "./tool_landing_page";
+import { registerFairCherSearchAdsTool } from "./tool_search_ads"; // ✅ NEW
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -10,8 +12,9 @@ app.use(express.json({ limit: "1mb" }));
 // Tool registry (MULTI-TOOL)
 // -----------------------------
 const tools: ToolRegistry = {
-  ...registerFairCherTool(),              // domain-as-advertiser
+  ...registerFairCherTool(),               // domain-as-advertiser summary
   ...registerFairCherLandingPageTool(),    // landing-page attribution
+  ...registerFairCherSearchAdsTool(),      // ✅ SEARCH ADS (TEXT ADS) – NEW
 };
 
 // -----------------------------
@@ -119,7 +122,7 @@ app.post("/", async (req, res) => {
 
       const toolResult = await tool.run(args ?? {});
 
-      // MCP: tools/call returns the CallToolResult directly.
+      // ✅ MCP-compliant: return CallToolResult directly
       return reply(toolResult);
     }
 
