@@ -119,10 +119,8 @@ app.post("/", async (req, res) => {
 
       const toolResult = await tool.run(args ?? {});
 
-      // CRITICAL: MCP expects toolResult wrapper
-      return reply({
-        toolResult,
-      });
+      // MCP: tools/call returns the CallToolResult directly.
+      return reply(toolResult);
     }
 
     return rpcError(-32601, `Method not found: ${method}`);
