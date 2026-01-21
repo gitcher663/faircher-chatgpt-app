@@ -74,7 +74,6 @@ export function transformUpstreamPayload(
 
     advertiserMap.get(advertiserId)!.count += 1;
 
-    // Format normalization
     const format = ad.ad_format?.toLowerCase();
     if (format === "text") formats.text += 1;
     if (format === "image") formats.image += 1;
@@ -126,7 +125,7 @@ export function transformUpstreamPayload(
       total_ads_found: ads.length,
       active_advertisers: advertiserMap.size,
       primary_advertiser: primaryAdvertiser?.name || null,
-      confidence: Math.min(1, ads.length / 20), // capped heuristic
+      confidence: Math.min(1, ads.length / 20),
     },
     activity: firstSeen && lastSeen
       ? {
@@ -141,3 +140,14 @@ export function transformUpstreamPayload(
         ? { formats }
         : null,
     advertisers: advertisersSorted.map(a => ({
+      name: a.name,
+      advertiser_id: a.advertiser_id,
+      ad_count_estimate: a.count,
+      is_primary: a.advertiser_id === primaryAdvertiser?.advertiser_id,
+    })),
+    metadata: {
+      data_window: "last_30_days",
+      source: "google_ads_transparency_center",
+    },
+  };
+}
