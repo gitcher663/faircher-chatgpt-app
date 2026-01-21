@@ -1,24 +1,23 @@
 import { differenceInDays, parseISO } from "date-fns";
+import type { UpstreamAdsPayload } from "./upstream";
 
 type UpstreamAd = {
   advertiser_name?: string;
   advertiser_id?: string;
-  ad_format?: string;
+  ad_format?: "text" | "image" | "video";
   first_seen?: string;
   last_seen?: string;
 };
 
 export function transformUpstreamPayload(
   domain: string,
-  upstream: any
+  upstream: UpstreamAdsPayload
 ) {
-  const ads: UpstreamAd[] = Array.isArray(upstream?.ads)
-    ? upstream.ads
+  const ads: UpstreamAd[] = Array.isArray((upstream as any)?.ads)
+    ? (upstream as any).ads
     : [];
 
-  // -----------------------------
-  // Early exit: no ads
-  // -----------------------------
+  // Early exit — no ads
   if (ads.length === 0) {
     return {
       domain,
@@ -39,16 +38,9 @@ export function transformUpstreamPayload(
     };
   }
 
-  // -----------------------------
-  // Advertiser aggregation
-  // -----------------------------
   const advertiserMap = new Map<
     string,
-    {
-      name: string;
-      advertiser_id: string;
-      count: number;
-    }
+    { name: string; advertiser_id: string; count: number }
   >();
 
   const formats: Record<"text" | "image" | "video", number> = {
@@ -57,8 +49,8 @@ export function transformUpstreamPayload(
     video: 0,
   };
 
-  let firstSeenDates: Date[] = [];
-  let lastSeenDates: Date[] = [];
+  const firstSeenDates: Date[] = [];
+  const lastSeenDates: Date[] = [];
 
   for (const ad of ads) {
     const advertiserId = ad.advertiser_id || "unknown";
@@ -74,27 +66,20 @@ export function transformUpstreamPayload(
 
     advertiserMap.get(advertiserId)!.count += 1;
 
-    const format = ad.ad_format?.toLowerCase();
-    if (format === "text") formats.text += 1;
-    if (format === "image") formats.image += 1;
-    if (format === "video") formats.video += 1;
+    if (ad.ad_format && formats[ad.ad_format] !== undefined) {
+      formats[ad.ad_format] += 1;
+    }
 
     if (ad.first_seen) firstSeenDates.push(parseISO(ad.first_seen));
     if (ad.last_seen) lastSeenDates.push(parseISO(ad.last_seen));
   }
 
-  // -----------------------------
-  // Advertiser ranking
-  // -----------------------------
   const advertisersSorted = Array.from(advertiserMap.values()).sort(
     (a, b) => b.count - a.count
   );
 
-  const primaryAdvertiser = advertisersSorted[0] || null;
+  const primaryAdvertiser = advertisersSorted[0] ?? null;
 
-  // -----------------------------
-  // Activity window
-  // -----------------------------
   const firstSeen =
     firstSeenDates.length > 0
       ? new Date(Math.min(...firstSeenDates.map(d => d.getTime())))
@@ -115,9 +100,6 @@ export function transformUpstreamPayload(
       ? differenceInDays(new Date(), lastSeen) <= 7
       : false;
 
-  // -----------------------------
-  // Final response
-  // -----------------------------
   return {
     domain,
     summary: {
@@ -127,14 +109,15 @@ export function transformUpstreamPayload(
       primary_advertiser: primaryAdvertiser?.name || null,
       confidence: Math.min(1, ads.length / 20),
     },
-    activity: firstSeen && lastSeen
-      ? {
-          first_seen: firstSeen.toISOString(),
-          last_seen: lastSeen.toISOString(),
-          is_recent: isRecent,
-          ad_lifespan_days: lifespanDays,
-        }
-      : null,
+    activity:
+      firstSeen && lastSeen
+        ? {
+            first_seen: firstSeen.toISOString(),
+            last_seen: lastSeen.toISOString(),
+            is_recent: isRecent,
+            ad_lifespan_days: lifespanDays,
+          }
+        : null,
     distribution:
       formats.text || formats.image || formats.video
         ? { formats }
