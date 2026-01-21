@@ -11,7 +11,6 @@ export type ToolDefinition = {
     openWorldHint?: boolean;
     destructiveHint?: boolean;
   };
-  _meta?: Record<string, unknown>;
 };
 
 export type ToolHandler = (args: any) => Promise<any>;
@@ -44,15 +43,6 @@ export function registerFairCherTool(): ToolRegistry {
       readOnlyHint: true,
       openWorldHint: false,
       destructiveHint: false
-    },
-    _meta: {
-      "openai/outputTemplate": {
-        id: "faircher-ads-summary",
-        url: "/ui/faircher-ads-summary",
-        mimeType: "text/html+skybridge"
-      },
-      "openai/toolInvocation/invoking": "Analyzing advertising activity...",
-      "openai/toolInvocation/invoked": "Advertising activity analyzed."
     }
   };
 
@@ -60,10 +50,7 @@ export function registerFairCherTool(): ToolRegistry {
     const domain = String(args?.domain || "");
     const normalizedDomain = normalizeDomain(domain);
 
-    const upstream = await fetchUpstreamAds({
-      domain: normalizedDomain
-    });
-
+    const upstream = await fetchUpstreamAds({ domain: normalizedDomain });
     const data = transformUpstreamPayload(normalizedDomain, upstream);
 
     return {
