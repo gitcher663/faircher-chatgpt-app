@@ -32,6 +32,11 @@ export function registerFairCherStreamingAdsTool() {
           type: "string",
           description: "Advertiser domain (e.g. tesla.com)",
         },
+        platform: {
+          type: "string",
+          enum: ["youtube"],
+          description: "Filter streaming ads by platform (e.g. youtube).",
+        },
       },
       required: ["domain"],
       additionalProperties: false,
@@ -43,18 +48,33 @@ export function registerFairCherStreamingAdsTool() {
 
     try {
       const domain = normalizeDomain(rawDomain);
+      const platform =
+        typeof args?.platform === "string" ? args.platform : undefined;
+      if (platform && platform !== "youtube") {
+        throw new Error(`Unsupported platform: ${platform}`);
+      }
+
       const upstream = await fetchAdsByFormat({ domain, adFormat: "video" });
       const data = transformAdsByFormat(domain, "video", upstream, 10);
       const enriched = await enrichAdsByFormatWithDetails(data);
+      const creatives =
+        platform === "youtube"
+          ? enriched.creatives.filter(creative => creative.platform === "youtube")
+          : enriched.creatives;
+      const filtered = {
+        ...enriched,
+        total_creatives: creatives.length,
+        creatives,
+      };
 
       const summaryText =
-        enriched.total_creatives === 0
+        filtered.total_creatives === 0
           ? `No recent streaming ads were found for ${domain} in the last 30 days.`
-          : `Found ${enriched.total_creatives} recent streaming ads for ${domain} in the last 30 days.`;
+          : `Found ${filtered.total_creatives} recent streaming ads for ${domain} in the last 30 days.`;
 
       return {
         content: [{ type: "text", text: summaryText }],
-        structuredContent: enriched,
+        structuredContent: filtered,
       };
     } catch (err: any) {
       const message =
