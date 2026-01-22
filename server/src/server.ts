@@ -164,6 +164,52 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
     }
   }
 
+  function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
+    try {
+      const inputSchema = tool?.inputSchema ?? {};
+      const properties =
+        typeof inputSchema?.properties === "object" && inputSchema?.properties
+          ? inputSchema.properties
+          : {};
+      const safeProperties = JSON.parse(JSON.stringify(properties ?? {})) as Record<
+        string,
+        unknown
+      >;
+      const required = Array.isArray(inputSchema?.required)
+        ? inputSchema.required.filter(
+            (key: unknown) =>
+              typeof key === "string" &&
+              Object.prototype.hasOwnProperty.call(safeProperties, key)
+          )
+        : [];
+      const name = typeof tool?.name === "string" ? tool.name.trim() : "";
+      const description =
+        typeof tool?.description === "string" ? tool.description.trim() : "";
+
+      if (!name) {
+        throw new Error("Tool definition is missing a valid name.");
+      }
+
+      return {
+        name,
+        description,
+        input_schema: {
+          type: "object",
+          properties: safeProperties,
+          required,
+          additionalProperties: false,
+        },
+      };
+    } catch (error) {
+      console.error("MCP TOOL DEFINITION ERROR", {
+        name: tool?.name,
+        error,
+        stack: error instanceof Error ? error.stack : error,
+      });
+      return null;
+    }
+  }
+
   try {
     if (jsonrpc !== "2.0" || typeof method !== "string") {
       return rpcError(-32600, "Invalid Request");
@@ -209,6 +255,10 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
           (definition): definition is NonNullable<typeof definition> =>
             definition !== null
         );
+
+      if (definitions.length === 0) {
+        console.error("MCP TOOL LIST ERROR: no valid tool definitions found.");
+      }
       return reply({
         tools: definitions,
       });
