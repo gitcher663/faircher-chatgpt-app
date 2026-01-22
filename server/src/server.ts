@@ -64,8 +64,24 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
-const jsonReplacer = (_key: string, value: unknown) =>
-  typeof value === "bigint" ? value.toString() : value;
+const jsonReplacer = () => {
+  const seen = new WeakSet<object>();
+  return (_key: string, value: unknown) => {
+    if (typeof value === "bigint") {
+      return value.toString();
+    }
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+    }
+    return value;
+  };
+};
+
+const sanitizeJson = (value: unknown) =>
+  JSON.parse(JSON.stringify(value, jsonReplacer()));
 
 function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
   try {
@@ -74,9 +90,7 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
       typeof inputSchema?.properties === "object" && inputSchema?.properties
         ? inputSchema.properties
         : {};
-    const safeProperties = JSON.parse(
-      JSON.stringify(properties ?? {}, jsonReplacer)
-    ) as Record<string, unknown>;
+    const safeProperties = sanitizeJson(properties ?? {}) as Record<string, unknown>;
     const required = Array.isArray(inputSchema?.required)
       ? inputSchema.required.filter(
           (key: unknown) =>
