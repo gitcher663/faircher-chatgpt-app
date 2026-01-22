@@ -1,21 +1,19 @@
 import { normalizeDomain } from "./normalize";
-import { fetchAdsByFormat } from "./fetchAdsByFormat";
-import { transformAdsByFormat } from "./transform_ads_by_format";
-import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
-import { buildFormatSummary } from "./summary_builder";
+import { fetchUpstreamAds } from "./upstream";
+import { transformUpstreamPayload } from "./transform";
+import { buildFormatSummaryData, buildFormatSummaryText } from "./summary_builder";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
     content: [{ type: "text", text: message }],
     structuredContent: {
-      domain: domain ?? "",
-      ad_format: "image",
-      total_creatives: 0,
-      creatives: [],
-      metadata: {
-        source: "google_ads_transparency_center",
-        time_window: "last_30_days",
-      },
+      format: "Display Ads",
+      analysis_window_days: 365,
+      region: "US",
+      total_ads_detected: 0,
+      share_of_total_activity: 0,
+      activity_pattern: "Burst-driven",
+      sales_signal_strength: "Weak",
       error: message,
     },
   };
@@ -25,7 +23,7 @@ export function registerFairCherDisplayAdsTool() {
   const definition = {
     name: "faircher_display_ads",
     description:
-      "Retrieve recent Google Display Ads (image ads) for a domain, including creative examples.",
+      "Retrieve Google Display Ads signals for a domain and summarize seller-facing activity.",
     inputSchema: {
       type: "object",
       properties: {
@@ -44,15 +42,14 @@ export function registerFairCherDisplayAdsTool() {
 
     try {
       const domain = normalizeDomain(rawDomain);
-      const upstream = await fetchAdsByFormat({ domain, adFormat: "image" });
-      const data = transformAdsByFormat(domain, "image", upstream, 10);
-      const enriched = await enrichAdsByFormatWithDetails(data);
-
-      const summaryText = buildFormatSummary(enriched);
+      const upstream = await fetchUpstreamAds({ domain });
+      const analysis = transformUpstreamPayload(domain, upstream);
+      const summary = buildFormatSummaryData(analysis, "Display Ads");
+      const summaryText = buildFormatSummaryText(domain, summary);
 
       return {
         content: [{ type: "text", text: summaryText }],
-        structuredContent: enriched,
+        structuredContent: summary,
       };
     } catch (err: any) {
       const message =

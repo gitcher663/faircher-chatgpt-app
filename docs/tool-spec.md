@@ -23,48 +23,76 @@ Validation and normalization rules:
   - Example: `ads.example.com` → **invalid_domain**.
 - Invalid domains return a structured error response (see **Error Contract**).
 
-## Output Schema — Advertising Activity Summary
+## Output Schema — Advertising Activity Summary (Seller View)
 
 The MCP server returns structured JSON matching the shared schema in
 `server/src/types.ts` and `ui/src/types.ts`.
 
-The response is deterministic, does **not** expose creative-level data, and is valid even
-when no ads are found.
+The response is deterministic, does **not** expose advertiser or creative data, and is valid even
+when no ads are found. All signals are scoped to the last 365 days in the United States.
 
 ```json
 {
   "domain": "example.com",
-  "summary": {
-    "is_running_ads": true,
-    "total_ads_found": 42,
-    "active_advertisers": 3,
-    "primary_advertiser": "Example Corp",
-    "confidence": 0.87
+  "advertising_activity_snapshot": {
+    "status": "Active",
+    "confidence_level": "High",
+    "analysis_window_days": 365,
+    "region": "US",
+    "sales_signal_strength": "Strong",
+    "total_ads_detected": 42
   },
-  "activity": {
-    "first_seen": "2024-01-10",
-    "last_seen": "2024-02-20",
-    "is_recent": true,
-    "ad_lifespan_days": 41
+  "advertising_behavior_profile": {
+    "advertising_intensity": "High",
+    "strategy_orientation": "Mixed",
+    "campaign_continuity": "Long-running",
+    "format_sophistication": "High",
+    "experimentation_level": "Moderate"
   },
-  "distribution": {
-    "formats": {
-      "text": 12,
-      "image": 24,
-      "video": 6
-    }
+  "activity_timeline": {
+    "first_observed": "2024-01-10",
+    "most_recent_activity": "2024-12-15",
+    "ad_longevity_days": 340,
+    "always_on_presence": "Yes"
   },
-  "advertisers": [
-    {
-      "name": "Example Corp",
-      "advertiser_id": "adv_123",
-      "ad_count_estimate": 30,
-      "is_primary": true
-    }
+  "ad_format_mix": [
+    { "format": "Search Ads", "count": 12, "share": 28.6 },
+    { "format": "Display Ads", "count": 24, "share": 57.1 },
+    { "format": "Video Ads", "count": 6, "share": 14.3 }
   ],
-  "metadata": {
-    "data_window": "2024-01-01..2024-02-20",
-    "source": "TODO"
+  "campaign_stability_signals": {
+    "average_ad_lifespan_days": 42,
+    "creative_rotation": "Moderate",
+    "burst_activity_detected": "No",
+    "volatility_index": "Low"
+  },
+  "advertiser_scale": {
+    "scale_classification": "Regional",
+    "geographic_focus": "Multi-market",
+    "buying_complexity": "Moderate"
+  },
+  "estimated_monthly_media_spend": {
+    "spend_tier": "$20,001 – $100,000 / month"
+  },
+  "spend_adequacy": {
+    "relative_investment_level": "Appropriately Invested",
+    "consistency_vs_scale": "High",
+    "growth_headroom": "Moderate"
+  },
+  "spend_posture": {
+    "commitment_level": "Sustained",
+    "scaling_pattern": "Flat",
+    "risk_profile": "Balanced"
+  },
+  "sales_interpretation": {
+    "sell_with_opportunity": "Position as a regional buyer with $20,001 – $100,000 / month signals and moderate format depth.",
+    "sell_against_opportunity": "Highlight competitive coverage gaps when activity shifts always-on and reinforce share-of-voice protection.",
+    "outreach_recommendation": "Package inventory bundles matched to regional scale, balancing always-on coverage with flexible bursts."
+  },
+  "data_scope": {
+    "geography": "United States",
+    "lookback_window_days": 365,
+    "source": "Google Ads Transparency Center"
   }
 }
 ```
@@ -72,11 +100,17 @@ when no ads are found.
 Field notes:
 
 - `domain`: Normalized apex domain.
-- `summary`: High-level metrics for the domain.
-- `activity`: Timing information for observed ads. `null` when no ads are found.
-- `distribution`: Aggregated distribution of ad formats. `null` when no ads are found.
-- `advertisers`: List of advertisers with aggregated counts; empty array when no ads are found.
-- `metadata`: Data provenance and window information.
+- `advertising_activity_snapshot`: Top-line activity signals scoped to 365 days (US).
+- `advertising_behavior_profile`: Qualitative profile for sales qualification.
+- `activity_timeline`: First/most-recent activity and continuity.
+- `ad_format_mix`: Canonical format counts and share (%).
+- `campaign_stability_signals`: Rotation and volatility indicators.
+- `advertiser_scale`: Inferred scale and buying complexity.
+- `estimated_monthly_media_spend`: Tiered spend estimate.
+- `spend_adequacy`: Investment alignment relative to scale.
+- `spend_posture`: Commitment and risk posture.
+- `sales_interpretation`: Seller-facing guidance.
+- `data_scope`: Geography, lookback, and source metadata.
 
 ## Error Contract
 
