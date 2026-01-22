@@ -64,6 +64,54 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+const jsonReplacer = (_key: string, value: unknown) =>
+  typeof value === "bigint" ? value.toString() : value;
+
+function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
+  try {
+    const inputSchema = tool?.inputSchema ?? {};
+    const properties =
+      typeof inputSchema?.properties === "object" && inputSchema?.properties
+        ? inputSchema.properties
+        : {};
+    const safeProperties = JSON.parse(
+      JSON.stringify(properties ?? {}, jsonReplacer)
+    ) as Record<string, unknown>;
+    const required = Array.isArray(inputSchema?.required)
+      ? inputSchema.required.filter(
+          (key: unknown) =>
+            typeof key === "string" &&
+            Object.prototype.hasOwnProperty.call(safeProperties, key)
+        )
+      : [];
+    const name = typeof tool?.name === "string" ? tool.name.trim() : "";
+    const description =
+      typeof tool?.description === "string" ? tool.description.trim() : "";
+
+    if (!name) {
+      throw new Error("Tool definition is missing a valid name.");
+    }
+
+    return {
+      name,
+      description,
+      input_schema: {
+        type: "object",
+        properties: safeProperties,
+        required,
+        additionalProperties: false,
+      },
+    };
+  } catch (error) {
+    console.error("MCP TOOL DEFINITION ERROR", {
+      name: tool?.name,
+      error,
+      stack: error instanceof Error ? error.stack : error,
+    });
+    return null;
+  }
+}
+
 // -----------------------------
 // MCP-style JSON-RPC logic
 // -----------------------------
@@ -87,128 +135,23 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
       additionalProperties: false,
     };
 
-    return {
-      name: tool.name,
-      description: tool.description,
-      inputSchema: schemaPayload,
-      input_schema: schemaPayload,
-      annotations: tool.annotations,
-      securitySchemes: tool.securitySchemes,
-      _meta: tool._meta,
-    };
-  } catch (error) {
-    console.error("MCP TOOL DEFINITION ERROR", {
-      name: tool?.name,
-      error,
-      stack: error instanceof Error ? error.stack : error,
-    });
-    return null;
-  }
-}
-
-async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
-  const { jsonrpc, id, method, params } = body ?? {};
-
-  function reply(result: unknown): RpcReply {
-    return {
+  const reply = (result: unknown) => {
+    if (isNotification) return res.status(204).end();
+    return res.json({
       jsonrpc: "2.0",
       id,
       result,
-    };
-  }
+    });
+  };
 
-  function rpcError(code: number, message: string, data?: unknown): RpcReply {
-    return {
+  const rpcError = (code: number, message: string, data?: unknown) => {
+    if (isNotification) return res.status(204).end();
+    return res.json({
       jsonrpc: "2.0",
       id,
       error: { code, message, data },
-    };
-  }
-
-  function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
-    try {
-      const inputSchema = tool?.inputSchema ?? {};
-      const properties =
-        typeof inputSchema?.properties === "object" && inputSchema?.properties
-          ? inputSchema.properties
-          : {};
-      const safeProperties = JSON.parse(JSON.stringify(properties ?? {})) as Record<
-        string,
-        unknown
-      >;
-      const required = Array.isArray(inputSchema?.required)
-        ? inputSchema.required.filter(
-            (key: unknown) =>
-              typeof key === "string" &&
-              Object.prototype.hasOwnProperty.call(safeProperties, key)
-          )
-        : [];
-
-      return {
-        name: typeof tool.name === "string" ? tool.name : "",
-        description: typeof tool.description === "string" ? tool.description : "",
-        input_schema: {
-          type: "object",
-          properties: safeProperties,
-          required,
-          additionalProperties: false,
-        },
-      };
-    } catch (error) {
-      console.error("MCP TOOL DEFINITION ERROR", {
-        name: tool?.name,
-        error,
-        stack: error instanceof Error ? error.stack : error,
-      });
-      return null;
-    }
-  }
-
-  function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
-    try {
-      const inputSchema = tool?.inputSchema ?? {};
-      const properties =
-        typeof inputSchema?.properties === "object" && inputSchema?.properties
-          ? inputSchema.properties
-          : {};
-      const safeProperties = JSON.parse(JSON.stringify(properties ?? {})) as Record<
-        string,
-        unknown
-      >;
-      const required = Array.isArray(inputSchema?.required)
-        ? inputSchema.required.filter(
-            (key: unknown) =>
-              typeof key === "string" &&
-              Object.prototype.hasOwnProperty.call(safeProperties, key)
-          )
-        : [];
-      const name = typeof tool?.name === "string" ? tool.name.trim() : "";
-      const description =
-        typeof tool?.description === "string" ? tool.description.trim() : "";
-
-      if (!name) {
-        throw new Error("Tool definition is missing a valid name.");
-      }
-
-      return {
-        name,
-        description,
-        input_schema: {
-          type: "object",
-          properties: safeProperties,
-          required,
-          additionalProperties: false,
-        },
-      };
-    } catch (error) {
-      console.error("MCP TOOL DEFINITION ERROR", {
-        name: tool?.name,
-        error,
-        stack: error instanceof Error ? error.stack : error,
-      });
-      return null;
-    }
-  }
+    });
+  };
 
   try {
     if (jsonrpc !== "2.0" || typeof method !== "string") {
