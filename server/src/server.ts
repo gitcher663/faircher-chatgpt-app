@@ -50,6 +50,82 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+const jsonReplacer = () => {
+  const seen = new WeakSet<object>();
+  return (_key: string, value: unknown) => {
+    if (typeof value === "bigint") {
+      return value.toString();
+    }
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value)) {
+        return undefined;
+      }
+      seen.add(value);
+    }
+    return value;
+  };
+};
+
+const sanitizeJson = (value: unknown, context: string) => {
+  try {
+    return JSON.parse(JSON.stringify(value, jsonReplacer()));
+  } catch (error) {
+    console.error("MCP JSON SANITIZE ERROR", {
+      context,
+      error,
+      stack: error instanceof Error ? error.stack : error,
+    });
+    return null;
+  }
+};
+
+function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
+  try {
+    const inputSchema = tool?.inputSchema ?? {};
+    const properties =
+      typeof inputSchema?.properties === "object" && inputSchema?.properties
+        ? inputSchema.properties
+        : {};
+    const safeProperties =
+      (sanitizeJson(properties ?? {}, "tool inputSchema.properties") as Record<
+        string,
+        unknown
+      >) ?? {};
+    const required = Array.isArray(inputSchema?.required)
+      ? inputSchema.required.filter(
+          (key: unknown) =>
+            typeof key === "string" &&
+            Object.prototype.hasOwnProperty.call(safeProperties, key)
+        )
+      : [];
+    const name = typeof tool?.name === "string" ? tool.name.trim() : "";
+    const description =
+      typeof tool?.description === "string" ? tool.description.trim() : "";
+
+    if (!name) {
+      throw new Error("Tool definition is missing a valid name.");
+    }
+
+    return {
+      name,
+      description,
+      input_schema: {
+        type: "object",
+        properties: safeProperties,
+        required,
+        additionalProperties: false,
+      },
+    };
+  } catch (error) {
+    console.error("MCP TOOL DEFINITION ERROR", {
+      name: tool?.name,
+      error,
+      stack: error instanceof Error ? error.stack : error,
+    });
+    return null;
+  }
+}
+
 // -----------------------------
 // MCP-style JSON-RPC endpoint
 // -----------------------------
@@ -59,23 +135,30 @@ app.post("/", async (req, res) => {
 
   const isNotification = id === undefined || id === null;
 
-  function reply(result: unknown) {
+  const reply = (result: unknown) => {
+    const safeResult = sanitizeJson(result, "jsonrpc result");
     if (isNotification) return res.status(204).end();
     return res.json({
       jsonrpc: "2.0",
       id,
-      result,
+      result: safeResult ?? null,
     });
-  }
+  };
 
-  function rpcError(code: number, message: string, data?: unknown) {
+  const rpcError = (code: number, message: string, data?: unknown) => {
+    const safeData =
+      data === undefined ? undefined : sanitizeJson(data, "jsonrpc error data");
     if (isNotification) return res.status(204).end();
     return res.json({
       jsonrpc: "2.0",
       id,
-      error: { code, message, data },
+      error: {
+        code,
+        message,
+        ...(safeData === undefined ? {} : { data: safeData ?? null }),
+      },
     });
-  }
+  };
 
   try {
     if (jsonrpc !== "2.0" || typeof method !== "string") {
@@ -86,14 +169,23 @@ app.post("/", async (req, res) => {
     // MCP: initialize
     // -----------------------------
     if (method === "initialize") {
+      const safeParams =
+        typeof params === "object" && params !== null ? params : {};
+      const clientInfo =
+        typeof (safeParams as { clientInfo?: unknown }).clientInfo === "object" &&
+        (safeParams as { clientInfo?: unknown }).clientInfo !== null
+          ? (safeParams as { clientInfo?: Record<string, unknown> }).clientInfo
+          : {};
       const clientProtocolVersion =
-        typeof params?.protocolVersion === "string"
-          ? params.protocolVersion
+        typeof (safeParams as { protocolVersion?: string }).protocolVersion ===
+        "string"
+          ? (safeParams as { protocolVersion?: string }).protocolVersion
           : "2024-11-05";
 
       return reply({
         protocolVersion: clientProtocolVersion,
         serverInfo: { name: "faircher-mcp", version: "1.0.0" },
+        clientInfo,
         capabilities: { tools: {} },
       });
     }
@@ -107,8 +199,18 @@ app.post("/", async (req, res) => {
     // MCP: tools/list
     // -----------------------------
     if (method === "tools/list") {
+      const definitions = Object.values(tools)
+        .map(tool => buildStrictToolDefinition(tool.definition))
+        .filter(
+          (definition): definition is NonNullable<typeof definition> =>
+            definition !== null
+        );
+
+      if (definitions.length === 0) {
+        console.error("MCP TOOL LIST ERROR: no valid tool definitions found.");
+      }
       return reply({
-        tools: Object.values(tools).map(t => t.definition),
+        tools: definitions,
       });
     }
 
@@ -136,6 +238,12 @@ app.post("/", async (req, res) => {
 
     return rpcError(-32601, `Method not found: ${method}`);
   } catch (e: any) {
+    console.error("MCP SERVER ERROR", {
+      method,
+      params,
+      error: e?.message ?? String(e),
+      stack: e instanceof Error ? e.stack : e,
+    });
     return rpcError(-32000, "Server error", {
       message: e?.message ?? String(e),
     });
