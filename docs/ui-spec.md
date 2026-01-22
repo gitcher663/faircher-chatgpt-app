@@ -140,6 +140,10 @@ window.openai.setWidgetState()
 
 Business data MUST NOT be stored in widget state.
 
+Current widget state usage:
+
+- `showDetails`: boolean toggle controlling the expanded seller detail sections.
+
 ---
 
 ## Visual Design Guidelines
