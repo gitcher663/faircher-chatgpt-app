@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { AdsSummaryOutput } from "../types";
 import DistributionBar from "./DistributionBar";
 
@@ -26,6 +27,10 @@ export default function AdsSummaryCard({
     sales_interpretation: sales,
     data_scope: scope,
   } = data;
+
+  useEffect(() => {
+    window.openai?.notifyIntrinsicHeight?.();
+  }, [showDetails]);
 
   return (
     <section className="summary-card">

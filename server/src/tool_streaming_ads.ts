@@ -35,6 +35,20 @@ export function registerFairCherStreamingAdsTool() {
       required: ["domain"],
       additionalProperties: false,
     },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing video ads…",
+      "openai/toolInvocation/invoked": "Video ads summary ready",
+    },
   };
 
   const run = async (args: any) => {

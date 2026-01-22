@@ -144,6 +144,10 @@ Current widget state usage:
 
 - `showDetails`: boolean toggle controlling the expanded seller detail sections.
 
+Dynamic sizing:
+
+- Call `window.openai.notifyIntrinsicHeight()` after toggling details to avoid iframe clipping.
+
 ---
 
 ## Visual Design Guidelines

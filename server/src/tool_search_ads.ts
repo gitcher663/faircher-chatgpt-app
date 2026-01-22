@@ -35,6 +35,20 @@ export function registerFairCherSearchAdsTool() {
       required: ["domain"],
       additionalProperties: false,
     },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing search ads…",
+      "openai/toolInvocation/invoked": "Search ads summary ready",
+    },
   };
 
   const run = async (args: any) => {

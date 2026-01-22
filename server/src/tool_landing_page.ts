@@ -35,6 +35,15 @@ export function registerFairCherLandingPageTool() {
       openWorldHint: false,
       destructiveHint: false,
     },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing landing page ads…",
+      "openai/toolInvocation/invoked": "Landing page summary ready",
+    },
   };
 
   const run = async (args: any) => {

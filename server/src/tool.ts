@@ -22,11 +22,13 @@ export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: any;
+  securitySchemes?: Array<{ type: string; scopes?: string[] }>;
   annotations?: {
     readOnlyHint?: boolean;
     openWorldHint?: boolean;
     destructiveHint?: boolean;
   };
+  _meta?: Record<string, unknown>;
 };
 
 export type ToolHandler = (args: any) => Promise<any>;
@@ -59,6 +61,15 @@ export function registerFairCherTool(): ToolRegistry {
       readOnlyHint: true,
       openWorldHint: false,
       destructiveHint: false
+    },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing ad activity…",
+      "openai/toolInvocation/invoked": "Seller summary ready"
     }
   };
 
