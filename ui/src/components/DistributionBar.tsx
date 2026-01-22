@@ -25,11 +25,9 @@ export default function DistributionBar({ formats }: Props) {
               {format.format}: {count} ({format.share}%)
             </div>
             <div
+              className="format-bar"
               style={{
-                height: "6px",
                 width: `${width}%`,
-                backgroundColor: "#888",
-                borderRadius: "3px",
               }}
             />
           </div>

@@ -153,6 +153,7 @@ Dynamic sizing:
 ## Visual Design Guidelines
 
 - Use system fonts only
+- Accent with Faircher brand colors (hot pink and black) for highlights and bars.
 - Clear vertical hierarchy
 - Optimized for inline display
 - No nested scrolling
