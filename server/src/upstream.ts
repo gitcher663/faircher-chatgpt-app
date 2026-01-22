@@ -55,7 +55,6 @@ export async function fetchUpstreamAds(
     engine: "google_ads_transparency_center",
     domain: args.domain,
     time_period: normalizeTimePeriod("last_365_days"),
-    ad_format: "all",
     num: "200",
     region: "US"
   });
