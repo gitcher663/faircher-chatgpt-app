@@ -1,21 +1,19 @@
 import { normalizeDomain } from "./normalize";
-import { fetchAdsByFormat } from "./fetchAdsByFormat";
-import { transformAdsByFormat } from "./transform_ads_by_format";
-import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
-import { buildFormatSummary } from "./summary_builder";
+import { fetchUpstreamAds } from "./upstream";
+import { transformUpstreamPayload } from "./transform";
+import { buildFormatSummaryData, buildFormatSummaryText } from "./summary_builder";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
     content: [{ type: "text", text: message }],
     structuredContent: {
-      domain: domain ?? "",
-      ad_format: "video",
-      total_creatives: 0,
-      creatives: [],
-      metadata: {
-        source: "google_ads_transparency_center",
-        time_window: "last_30_days",
-      },
+      format: "Video Ads",
+      analysis_window_days: 365,
+      region: "US",
+      total_ads_detected: 0,
+      share_of_total_activity: 0,
+      activity_pattern: "Burst-driven",
+      sales_signal_strength: "Weak",
       error: message,
     },
   };
@@ -25,18 +23,13 @@ export function registerFairCherStreamingAdsTool() {
   const definition = {
     name: "faircher_streaming_ads",
     description:
-      "Retrieve recent Google Streaming Ads (video ads) for a domain, including creative examples.",
+      "Retrieve Google Video Ads signals for a domain and summarize seller-facing activity.",
     inputSchema: {
       type: "object",
       properties: {
         domain: {
           type: "string",
           description: "Advertiser domain (e.g. tesla.com)",
-        },
-        platform: {
-          type: "string",
-          enum: ["youtube"],
-          description: "Filter streaming ads by platform (e.g. youtube).",
         },
       },
       required: ["domain"],
@@ -49,30 +42,14 @@ export function registerFairCherStreamingAdsTool() {
 
     try {
       const domain = normalizeDomain(rawDomain);
-      const platform =
-        typeof args?.platform === "string" ? args.platform : undefined;
-      if (platform && platform !== "youtube") {
-        throw new Error(`Unsupported platform: ${platform}`);
-      }
-
-      const upstream = await fetchAdsByFormat({ domain, adFormat: "video" });
-      const data = transformAdsByFormat(domain, "video", upstream, 10);
-      const enriched = await enrichAdsByFormatWithDetails(data);
-      const creatives =
-        platform === "youtube"
-          ? enriched.creatives.filter(creative => creative.platform === "youtube")
-          : enriched.creatives;
-      const filtered = {
-        ...enriched,
-        total_creatives: creatives.length,
-        creatives,
-      };
-
-      const summaryText = buildFormatSummary(filtered);
+      const upstream = await fetchUpstreamAds({ domain });
+      const analysis = transformUpstreamPayload(domain, upstream);
+      const summary = buildFormatSummaryData(analysis, "Video Ads");
+      const summaryText = buildFormatSummaryText(domain, summary);
 
       return {
         content: [{ type: "text", text: summaryText }],
-        structuredContent: filtered,
+        structuredContent: summary,
       };
     } catch (err: any) {
       const message =

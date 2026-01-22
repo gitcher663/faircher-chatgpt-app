@@ -28,10 +28,10 @@ export async function fetchAdsByFormat(
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
     domain: args.domain,
-    time_period: "last_30_days",
+    time_period: "last_365_days",
     ad_format: adFormat,
-    num: String(args.num ?? 40),
-    region: "ANYWHERE",
+    num: String(args.num ?? 200),
+    region: "US",
   });
 
   const requestUrl = `${SEARCH_API_URL}?${params.toString()}`;

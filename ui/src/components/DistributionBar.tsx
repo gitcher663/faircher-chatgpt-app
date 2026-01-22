@@ -1,24 +1,24 @@
-import type { Distribution } from "../types";
+import type { AdsSummaryOutput } from "../types";
 
 type Props = {
-  distribution: Distribution;
+  formats: AdsSummaryOutput["ad_format_mix"];
 };
 
-export default function DistributionBar({ distribution }: Props) {
-  const formats = distribution.formats;
-  const max = Math.max(...Object.values(formats));
+export default function DistributionBar({ formats }: Props) {
+  const max = Math.max(0, ...formats.map(item => item.count));
 
   return (
     <div style={{ marginTop: "12px" }}>
       <h4>Ad formats</h4>
 
-      {Object.entries(formats).map(([format, count]) => {
+      {formats.map(format => {
+        const count = format.count;
         const width = max > 0 ? (count / max) * 100 : 0;
 
         return (
-          <div key={format} style={{ marginBottom: "6px" }}>
+          <div key={format.format} style={{ marginBottom: "6px" }}>
             <div style={{ fontSize: "12px" }}>
-              {format}: {count}
+              {format.format}: {count} ({format.share}%)
             </div>
             <div
               style={{
