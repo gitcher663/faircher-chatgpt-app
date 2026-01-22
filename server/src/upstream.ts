@@ -1,3 +1,6 @@
+import { normalizeDomain } from "./normalize";
+import { normalizeTimePeriod } from "./time_period";
+
 export type UpstreamAdsPayload = {
   search_metadata?: {
     status?: string;
@@ -49,12 +52,13 @@ export async function fetchUpstreamAds(
     throw new Error("Missing UPSTREAM_API_KEY");
   }
 
+  const domain = normalizeDomain(args.domain);
+
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
-    domain: args.domain,
-    time_period: "last_365_days",
-    ad_format: "all",
-    num: "200",
+    domain,
+    time_period: normalizeTimePeriod("last_365_days"),
+    num: "100",
     region: "US"
   });
 

@@ -1,13 +1,62 @@
 import { ValidationError } from "./errors.js";
 
-export function normalizeDomain(input: string): string {
-  const trimmed = input.trim().toLowerCase();
+const MAX_DOMAIN_LENGTH = 253;
 
-  if (!trimmed) {
+function isValidLabel(label: string): boolean {
+  if (!/^[a-z0-9-]+$/.test(label)) {
+    return false;
+  }
+
+  if (label.startsWith("-") || label.endsWith("-")) {
+    return false;
+  }
+
+  return label.length >= 1 && label.length <= 63;
+}
+
+function isValidDomain(domain: string): boolean {
+  if (!domain || domain.length > MAX_DOMAIN_LENGTH) {
+    return false;
+  }
+
+  if (/[\/\s]/.test(domain) || domain.includes("http")) {
+    return false;
+  }
+
+  const labels = domain.split(".");
+  if (labels.length < 2) {
+    return false;
+  }
+
+  if (!labels.every(isValidLabel)) {
+    return false;
+  }
+
+  const tld = labels[labels.length - 1];
+  if (!/^[a-z]{2,63}$/.test(tld)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function normalizeDomain(input: string): string {
+  let normalized = input.trim().toLowerCase();
+
+  if (!normalized) {
     throw new ValidationError("Domain is required.");
   }
 
-  return trimmed
-    .replace(/^https?:\/\//, "")
-    .replace(/\/$/, "");
+  normalized = normalized.replace(/^https?:\/\//, "");
+  normalized = normalized.replace(/^www\d*\./, "");
+  normalized = normalized.replace(/:\d+(?=\/|$)/, "");
+  normalized = normalized.split("/")[0];
+  normalized = normalized.split("?")[0];
+  normalized = normalized.split("#")[0];
+
+  if (!isValidDomain(normalized)) {
+    throw new ValidationError("Domain must be a valid apex domain.");
+  }
+
+  return normalized;
 }

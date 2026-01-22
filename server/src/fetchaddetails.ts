@@ -61,7 +61,8 @@ export async function fetchAdDetails(args: {
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center_ad_details",
     advertiser_id: args.advertiserId,
-    creative_id: args.creativeId
+    creative_id: args.creativeId,
+    region: "US"
   });
 
   const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {

@@ -10,6 +10,20 @@ import { registerFairCherStreamingAdsTool } from "./tool_streaming_ads";
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+type JsonRpcRequest = {
+  jsonrpc?: string;
+  id?: string | number | null;
+  method?: string;
+  params?: Record<string, unknown>;
+};
+
+type RpcReply = {
+  jsonrpc: "2.0";
+  id: string | number | null | undefined;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+};
+
 // -----------------------------
 // Tool registry (MULTI-TOOL)
 // -----------------------------
@@ -41,7 +55,7 @@ app.get("/", (_req, res) => {
   res
     .status(200)
     .send(
-      "FairCher MCP server is running. Use JSON-RPC POST / (initialize, tools/list, tools/call)."
+      "FairCher MCP server is running. Use JSON-RPC POST / or /mcp (initialize, tools/list, tools/call). SSE: GET /sse + POST /messages."
     );
 });
 
@@ -127,13 +141,27 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
 }
 
 // -----------------------------
-// MCP-style JSON-RPC endpoint
+// MCP-style JSON-RPC logic
 // -----------------------------
-app.post("/", async (req, res) => {
-  const body = req.body ?? {};
-  const { jsonrpc, id, method, params } = body;
+function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
+  try {
+    const inputSchema = tool?.inputSchema ?? {};
+    const properties =
+      typeof inputSchema?.properties === "object" && inputSchema?.properties
+        ? inputSchema.properties
+        : {};
+    const required = Array.isArray(inputSchema?.required)
+      ? inputSchema.required.filter((key: unknown) =>
+          typeof key === "string" && Object.prototype.hasOwnProperty.call(properties, key)
+        )
+      : [];
 
-  const isNotification = id === undefined || id === null;
+    const schemaPayload = {
+      type: "object",
+      properties,
+      required,
+      additionalProperties: false,
+    };
 
   const reply = (result: unknown) => {
     const safeResult = sanitizeJson(result, "jsonrpc result");
@@ -248,7 +276,72 @@ app.post("/", async (req, res) => {
       message: e?.message ?? String(e),
     });
   }
+}
+
+function isNotificationRequest(body: JsonRpcRequest) {
+  return body?.id === undefined || body?.id === null;
+}
+
+// -----------------------------
+// Streamable HTTP: JSON-RPC POST
+// -----------------------------
+async function handleJsonRpcHttp(req: express.Request, res: express.Response) {
+  const body = req.body ?? {};
+  const reply = await handleJsonRpc(body as JsonRpcRequest);
+  if (isNotificationRequest(body)) {
+    return res.status(204).end();
+  }
+  return res.status(200).json(reply);
+}
+
+app.post("/", handleJsonRpcHttp);
+app.post("/mcp", handleJsonRpcHttp);
+
+// -----------------------------
+// SSE transport: GET /sse + POST /messages
+// -----------------------------
+const sseClients = new Set<express.Response>();
+
+app.get("/sse", (req, res) => {
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  res.write("event: ready\ndata: {}\n\n");
+
+  sseClients.add(res);
+
+  req.on("close", () => {
+    sseClients.delete(res);
+  });
 });
+
+function publishSseMessage(payload: RpcReply) {
+  const data = JSON.stringify(payload);
+  for (const client of sseClients) {
+    client.write(`event: message\ndata: ${data}\n\n`);
+  }
+}
+
+async function handleSseMessage(req: express.Request, res: express.Response) {
+  const body = req.body ?? {};
+  const reply = await handleJsonRpc(body as JsonRpcRequest);
+
+  if (sseClients.size > 0) {
+    publishSseMessage(reply);
+    return res.status(isNotificationRequest(body) ? 204 : 202).end();
+  }
+
+  if (isNotificationRequest(body)) {
+    return res.status(204).end();
+  }
+
+  return res.status(200).json(reply);
+}
+
+app.post("/messages", handleSseMessage);
+app.post("/message", handleSseMessage);
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
