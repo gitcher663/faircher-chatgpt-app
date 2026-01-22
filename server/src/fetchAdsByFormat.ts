@@ -1,4 +1,6 @@
 import type { UpstreamAdsPayload } from "./upstream";
+import { normalizeDomain } from "./normalize";
+import { normalizeTimePeriod } from "./time_period";
 
 export type AdFormat = "text" | "image" | "video";
 
@@ -25,12 +27,15 @@ export async function fetchAdsByFormat(
     throw new Error(`Invalid ad_format: ${adFormat}`);
   }
 
+  const domain = normalizeDomain(args.domain);
+  const cappedNum = Math.min(Math.max(args.num ?? 100, 1), 100);
+
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
-    domain: args.domain,
-    time_period: "last_365_days",
+    domain,
+    time_period: normalizeTimePeriod("last_365_days"),
     ad_format: adFormat,
-    num: String(args.num ?? 200),
+    num: String(cappedNum),
     region: "US",
   });
 
