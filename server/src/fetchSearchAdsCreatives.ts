@@ -1,4 +1,5 @@
 import type { UpstreamAdsPayload } from "./upstream";
+import { normalizeDomain } from "./normalize";
 import { normalizeTimePeriod } from "./time_period";
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
@@ -26,7 +27,7 @@ export async function fetchSearchAds(
     num: "100"
   });
 
-  if (args.domain) params.set("domain", args.domain);
+  if (args.domain) params.set("domain", normalizeDomain(args.domain));
   if (args.advertiserId) params.set("advertiser_id", args.advertiserId);
 
   const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
