@@ -92,6 +92,9 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
       description: tool.description,
       inputSchema: schemaPayload,
       input_schema: schemaPayload,
+      annotations: tool.annotations,
+      securitySchemes: tool.securitySchemes,
+      _meta: tool._meta,
     };
   } catch (error) {
     console.error("MCP TOOL DEFINITION ERROR", {
