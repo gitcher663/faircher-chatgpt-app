@@ -80,8 +80,18 @@ const jsonReplacer = () => {
   };
 };
 
-const sanitizeJson = (value: unknown) =>
-  JSON.parse(JSON.stringify(value, jsonReplacer()));
+const sanitizeJson = (value: unknown, context: string) => {
+  try {
+    return JSON.parse(JSON.stringify(value, jsonReplacer()));
+  } catch (error) {
+    console.error("MCP JSON SANITIZE ERROR", {
+      context,
+      error,
+      stack: error instanceof Error ? error.stack : error,
+    });
+    return null;
+  }
+};
 
 function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
   try {
@@ -90,7 +100,11 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
       typeof inputSchema?.properties === "object" && inputSchema?.properties
         ? inputSchema.properties
         : {};
-    const safeProperties = sanitizeJson(properties ?? {}) as Record<string, unknown>;
+    const safeProperties =
+      (sanitizeJson(properties ?? {}, "tool inputSchema.properties") as Record<
+        string,
+        unknown
+      >) ?? {};
     const required = Array.isArray(inputSchema?.required)
       ? inputSchema.required.filter(
           (key: unknown) =>
@@ -150,20 +164,27 @@ function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
     };
 
   const reply = (result: unknown) => {
+    const safeResult = sanitizeJson(result, "jsonrpc result");
     if (isNotification) return res.status(204).end();
     return res.json({
       jsonrpc: "2.0",
       id,
-      result,
+      result: safeResult ?? null,
     });
   };
 
   const rpcError = (code: number, message: string, data?: unknown) => {
+    const safeData =
+      data === undefined ? undefined : sanitizeJson(data, "jsonrpc error data");
     if (isNotification) return res.status(204).end();
     return res.json({
       jsonrpc: "2.0",
       id,
-      error: { code, message, data },
+      error: {
+        code,
+        message,
+        ...(safeData === undefined ? {} : { data: safeData ?? null }),
+      },
     });
   };
 
