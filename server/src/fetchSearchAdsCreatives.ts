@@ -1,4 +1,5 @@
 import type { UpstreamAdsPayload } from "./upstream";
+import { normalizeTimePeriod } from "./time_period";
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
 
@@ -20,9 +21,9 @@ export async function fetchSearchAds(
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
     region: "US",
-    time_period: "last_365_days",
+    time_period: normalizeTimePeriod("last_365_days"),
     ad_format: "text",          // 🔒 THIS is the key: SEARCH ADS ONLY
-    num: "200"
+    num: "100"
   });
 
   if (args.domain) params.set("domain", args.domain);
