@@ -125,6 +125,45 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
     };
   }
 
+  function buildStrictToolDefinition(tool: ToolRegistry[string]["definition"]) {
+    try {
+      const inputSchema = tool?.inputSchema ?? {};
+      const properties =
+        typeof inputSchema?.properties === "object" && inputSchema?.properties
+          ? inputSchema.properties
+          : {};
+      const safeProperties = JSON.parse(JSON.stringify(properties ?? {})) as Record<
+        string,
+        unknown
+      >;
+      const required = Array.isArray(inputSchema?.required)
+        ? inputSchema.required.filter(
+            (key: unknown) =>
+              typeof key === "string" &&
+              Object.prototype.hasOwnProperty.call(safeProperties, key)
+          )
+        : [];
+
+      return {
+        name: typeof tool.name === "string" ? tool.name : "",
+        description: typeof tool.description === "string" ? tool.description : "",
+        input_schema: {
+          type: "object",
+          properties: safeProperties,
+          required,
+          additionalProperties: false,
+        },
+      };
+    } catch (error) {
+      console.error("MCP TOOL DEFINITION ERROR", {
+        name: tool?.name,
+        error,
+        stack: error instanceof Error ? error.stack : error,
+      });
+      return null;
+    }
+  }
+
   try {
     if (jsonrpc !== "2.0" || typeof method !== "string") {
       return rpcError(-32600, "Invalid Request");
@@ -137,8 +176,10 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
       const safeParams =
         typeof params === "object" && params !== null ? params : {};
       const clientInfo =
-        (safeParams as { clientInfo?: Record<string, unknown> }).clientInfo ??
-        {};
+        typeof (safeParams as { clientInfo?: unknown }).clientInfo === "object" &&
+        (safeParams as { clientInfo?: unknown }).clientInfo !== null
+          ? (safeParams as { clientInfo?: Record<string, unknown> }).clientInfo
+          : {};
       const clientProtocolVersion =
         typeof (safeParams as { protocolVersion?: string }).protocolVersion ===
         "string"
