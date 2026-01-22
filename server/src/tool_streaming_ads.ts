@@ -2,6 +2,7 @@ import { normalizeDomain } from "./normalize";
 import { fetchAdsByFormat } from "./fetchAdsByFormat";
 import { transformAdsByFormat } from "./transform_ads_by_format";
 import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
+import { buildFormatSummary } from "./summary_builder";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
@@ -67,10 +68,7 @@ export function registerFairCherStreamingAdsTool() {
         creatives,
       };
 
-      const summaryText =
-        filtered.total_creatives === 0
-          ? `No recent streaming ads were found for ${domain} in the last 30 days.`
-          : `Found ${filtered.total_creatives} recent streaming ads for ${domain} in the last 30 days.`;
+      const summaryText = buildFormatSummary(filtered);
 
       return {
         content: [{ type: "text", text: summaryText }],

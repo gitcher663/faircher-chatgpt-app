@@ -1,6 +1,7 @@
 import { normalizeDomain } from "./normalize";
 import { fetchUpstreamAds } from "./upstream";
 import { transformUpstreamPayload } from "./transform";
+import { buildDomainSummary } from "./summary_builder";
 
 /**
  * MCP requires a top-level `content` array.
@@ -73,42 +74,24 @@ export function registerFairCherTool(): ToolRegistry {
       // 3. Transform into canonical summary schema
       const data = transformUpstreamPayload(normalizedDomain, upstream);
 
-      // 4. Generate a robust natural-language summary
-      let summaryText: string | null = null;
-
-      if (!data?.summary) {
-        summaryText =
-          `Advertising data was retrieved for ${normalizedDomain}, ` +
-          `but could not be summarized due to an unexpected data shape.`;
-      } else if (!data.summary.is_running_ads) {
-        summaryText =
-          `No advertising activity was detected for ${data.domain} ` +
-          `in the last 30 days.`;
-      } else {
-        const advertiserList =
-          Array.isArray(data.advertisers) && data.advertisers.length > 0
-            ? data.advertisers
-                .slice(0, 3)
-                .map(a => a.name)
-                .join(", ")
-            : "unknown advertisers";
-
-        const formats =
-          data.distribution?.formats
-            ? Object.entries(data.distribution.formats)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(", ")
-            : "no format breakdown available";
-
-        summaryText =
-          `Advertising activity was found for ${data.domain}.\n\n` +
-          `• Total ads detected: ${data.summary.total_ads_found}\n` +
-          `• Active advertisers: ${data.summary.active_advertisers}\n` +
-          `• Primary advertiser: ${data.summary.primary_advertiser ?? "Unknown"}\n` +
-          `• Recent activity: ${data.activity?.is_recent ? "Yes" : "No"}\n` +
-          `• Ad formats: ${formats}\n\n` +
-          `Top advertisers include: ${advertiserList}.`;
-      }
+      // 4. Generate a structured FairCher summary
+      const summaryText = buildDomainSummary(
+        data?.summary
+          ? data
+          : {
+              domain: normalizedDomain,
+              summary: {
+                is_running_ads: false,
+                total_ads_found: 0,
+                active_advertisers: 0,
+                primary_advertiser: null,
+                confidence: 0,
+              },
+              activity: null,
+              distribution: null,
+              advertisers: [],
+            }
+      );
 
       // 🔒 HARD MCP INVARIANT — NEVER return empty / non-string text
       if (!summaryText || typeof summaryText !== "string") {
