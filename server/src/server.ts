@@ -32,6 +32,10 @@ app.get("/ui/faircher-ads-summary", (_req, res) => {
   res.sendFile(path.join(uiDistPath, "index.html"));
 });
 
+app.get("/ui/faircher/ads-summary.html", (_req, res) => {
+  res.sendFile(path.join(uiDistPath, "index.html"));
+});
+
 // Root info
 app.get("/", (_req, res) => {
   res

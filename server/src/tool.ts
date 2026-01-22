@@ -103,7 +103,7 @@ export function registerFairCherTool(): ToolRegistry {
         ],
         structuredContent: summary,
         _meta: {
-          "openai/outputTemplate": "faircher-ads-summary"
+          "openai/outputTemplate": "ui://faircher/ads-summary.html"
         }
       };
     } catch (err: any) {
