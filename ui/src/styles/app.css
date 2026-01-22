@@ -1,7 +1,11 @@
 :root {
+  color-scheme: light dark;
   font-family: "Inter", system-ui, sans-serif;
+  background-color: #f9fafb;
   color: #111827;
-  background-color: #ffffff;
+  --faircher-pink: #ff3ea5;
+  --faircher-pink-soft: #ffe2f2;
+  --faircher-black: #0b0b0f;
 }
 
 body {
@@ -10,7 +14,137 @@ body {
 }
 
 #root {
-  max-width: 720px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 16px;
+}
+
+.summary-card {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 62, 165, 0.2);
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.summary-kicker {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faircher-pink);
+  margin: 0 0 4px 0;
+}
+
+.summary-toggle {
+  border: 1px solid rgba(255, 62, 165, 0.5);
+  background: var(--faircher-pink-soft);
+  color: var(--faircher-black);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 4px 0;
+}
+
+.summary-value {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.summary-block {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.summary-muted {
+  color: #6b7280;
+  margin: 6px 0 0 0;
+}
+
+.format-row {
+  margin-bottom: 8px;
+}
+
+.format-label {
+  font-size: 12px;
+  color: #374151;
+}
+
+.format-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff3ea5, #0b0b0f);
+}
+
+@media (max-width: 600px) {
+  #root {
+    padding: 12px;
+  }
+
+  .summary-card {
+    padding: 16px;
+  }
+
+  .summary-header {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background-color: #0f172a;
+    color: #e2e8f0;
+  }
+
+  .summary-card {
+    background: #111827;
+    border-color: rgba(255, 62, 165, 0.4);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.5);
+  }
+
+  .summary-toggle {
+    background: rgba(255, 62, 165, 0.2);
+    border-color: rgba(255, 62, 165, 0.6);
+    color: #e5e7eb;
+  }
+
+  .summary-block {
+    border-color: #1f2937;
+  }
+
+  .summary-muted,
+  .summary-label,
+  .summary-kicker {
+    color: #94a3b8;
+  }
+
+  .format-label {
+    color: #e2e8f0;
+  }
+
+  .format-bar {
+    background: linear-gradient(90deg, #ff7ec8, #0b0b0f);
+  }
 }

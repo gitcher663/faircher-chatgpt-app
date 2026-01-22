@@ -1,7 +1,7 @@
 import { normalizeDomain } from "./normalize";
 import { fetchUpstreamAds } from "./upstream";
 import { transformUpstreamPayload } from "./transform";
-import { buildDomainSummary } from "./summary_builder";
+import { buildDomainSummaryText, buildSellerSummary } from "./summary_builder";
 
 /**
  * MCP requires a top-level `content` array.
@@ -22,11 +22,13 @@ export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: any;
+  securitySchemes?: Array<{ type: string; scopes?: string[] }>;
   annotations?: {
     readOnlyHint?: boolean;
     openWorldHint?: boolean;
     destructiveHint?: boolean;
   };
+  _meta?: Record<string, unknown>;
 };
 
 export type ToolHandler = (args: any) => Promise<any>;
@@ -43,7 +45,7 @@ export function registerFairCherTool(): ToolRegistry {
   const definition: ToolDefinition = {
     name: "faircher_domain_ads_summary",
     description:
-      "Summarized advertising activity for a domain, including advertisers, formats, and activity.",
+      "Summarized advertising activity for a domain with seller-facing spend, behavior, and format insights.",
     inputSchema: {
       type: "object",
       properties: {
@@ -59,6 +61,15 @@ export function registerFairCherTool(): ToolRegistry {
       readOnlyHint: true,
       openWorldHint: false,
       destructiveHint: false
+    },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing ad activity…",
+      "openai/toolInvocation/invoked": "Seller summary ready"
     }
   };
 
@@ -72,26 +83,11 @@ export function registerFairCherTool(): ToolRegistry {
       const upstream = await fetchUpstreamAds({ domain: normalizedDomain });
 
       // 3. Transform into canonical summary schema
-      const data = transformUpstreamPayload(normalizedDomain, upstream);
+      const analysis = transformUpstreamPayload(normalizedDomain, upstream);
+      const summary = buildSellerSummary(analysis);
 
       // 4. Generate a structured FairCher summary
-      const summaryText = buildDomainSummary(
-        data?.summary
-          ? data
-          : {
-              domain: normalizedDomain,
-              summary: {
-                is_running_ads: false,
-                total_ads_found: 0,
-                active_advertisers: 0,
-                primary_advertiser: null,
-                confidence: 0,
-              },
-              activity: null,
-              distribution: null,
-              advertisers: [],
-            }
-      );
+      const summaryText = buildDomainSummaryText(summary);
 
       // 🔒 HARD MCP INVARIANT — NEVER return empty / non-string text
       if (!summaryText || typeof summaryText !== "string") {
@@ -105,7 +101,7 @@ export function registerFairCherTool(): ToolRegistry {
             text: summaryText
           }
         ],
-        structuredContent: data,
+        structuredContent: summary,
         _meta: {
           "openai/outputTemplate": "faircher-ads-summary"
         }

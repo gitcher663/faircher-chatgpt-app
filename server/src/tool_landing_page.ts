@@ -1,6 +1,7 @@
 import { normalizeDomain } from "./normalize";
 import { fetchUpstreamAds } from "./upstream";
 import { transformLandingPagePayload } from "./transform_landing_page";
+import { buildDomainSummaryText, buildSellerSummary } from "./summary_builder";
 
 function mcpText(text: string) {
   return {
@@ -17,7 +18,7 @@ export function registerFairCherLandingPageTool() {
   const definition = {
     name: "faircher_landing_page_ads_summary",
     description:
-      "Summarized advertising activity for ads that link to a given domain, regardless of advertiser of record.",
+      "Summarized advertising activity for ads that link to a given domain, with seller-facing insights.",
     inputSchema: {
       type: "object",
       properties: {
@@ -34,6 +35,15 @@ export function registerFairCherLandingPageTool() {
       openWorldHint: false,
       destructiveHint: false,
     },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing landing page ads…",
+      "openai/toolInvocation/invoked": "Landing page summary ready",
+    },
   };
 
   const run = async (args: any) => {
@@ -41,18 +51,9 @@ export function registerFairCherLandingPageTool() {
       const domain = normalizeDomain(String(args?.domain || ""));
       const upstream = await fetchUpstreamAds({ domain });
 
-      const data = transformLandingPagePayload(domain, upstream);
-
-      const summaryText =
-        `Advertising activity was detected linking to ${domain}.\n\n` +
-        `• Total ads detected: ${data.summary.total_ads_found}\n` +
-        `• Active advertisers: ${data.summary.active_advertisers}\n` +
-        `• Primary advertiser: ${data.summary.primary_advertiser}\n` +
-        `• Recent activity: ${data.activity?.is_recent ? "Yes" : "No"}\n\n` +
-        `Top advertisers include: ${data.advertisers
-          .slice(0, 3)
-          .map(a => a.name)
-          .join(", ")}.`;
+      const analysis = transformLandingPagePayload(domain, upstream);
+      const summary = buildSellerSummary(analysis);
+      const summaryText = buildDomainSummaryText(summary);
 
       return {
         content: [
@@ -61,7 +62,7 @@ export function registerFairCherLandingPageTool() {
             text: summaryText,
           },
         ],
-        structuredContent: data,
+        structuredContent: summary,
       };
     } catch (err: any) {
       return mcpText(

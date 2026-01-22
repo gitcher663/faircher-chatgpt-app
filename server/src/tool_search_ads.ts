@@ -1,21 +1,19 @@
 import { normalizeDomain } from "./normalize";
-import { fetchAdsByFormat } from "./fetchAdsByFormat";
-import { transformAdsByFormat } from "./transform_ads_by_format";
-import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
-import { buildFormatSummary } from "./summary_builder";
+import { fetchUpstreamAds } from "./upstream";
+import { transformUpstreamPayload } from "./transform";
+import { buildFormatSummaryData, buildFormatSummaryText } from "./summary_builder";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
     content: [{ type: "text", text: message }],
     structuredContent: {
-      domain: domain ?? "",
-      ad_format: "text",
-      total_creatives: 0,
-      creatives: [],
-      metadata: {
-        source: "google_ads_transparency_center",
-        time_window: "last_30_days",
-      },
+      format: "Search Ads",
+      analysis_window_days: 365,
+      region: "US",
+      total_ads_detected: 0,
+      share_of_total_activity: 0,
+      activity_pattern: "Burst-driven",
+      sales_signal_strength: "Weak",
       error: message,
     },
   };
@@ -25,7 +23,7 @@ export function registerFairCherSearchAdsTool() {
   const definition = {
     name: "faircher_search_ads",
     description:
-      "Retrieve recent Google Search Ads (text ads) for a domain, including creative examples.",
+      "Retrieve Google Search Ads signals for a domain and summarize seller-facing activity.",
     inputSchema: {
       type: "object",
       properties: {
@@ -37,6 +35,20 @@ export function registerFairCherSearchAdsTool() {
       required: ["domain"],
       additionalProperties: false,
     },
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
+    securitySchemes: [{ type: "noauth" }],
+    _meta: {
+      securitySchemes: [{ type: "noauth" }],
+      "openai/outputTemplate": "ui://faircher/ads-summary.html",
+      "openai/widgetAccessible": true,
+      "openai/visibility": "public",
+      "openai/toolInvocation/invoking": "Analyzing search ads…",
+      "openai/toolInvocation/invoked": "Search ads summary ready",
+    },
   };
 
   const run = async (args: any) => {
@@ -44,15 +56,14 @@ export function registerFairCherSearchAdsTool() {
 
     try {
       const domain = normalizeDomain(rawDomain);
-      const upstream = await fetchAdsByFormat({ domain, adFormat: "text" });
-      const data = transformAdsByFormat(domain, "text", upstream, 10);
-      const enriched = await enrichAdsByFormatWithDetails(data);
-
-      const summaryText = buildFormatSummary(enriched);
+      const upstream = await fetchUpstreamAds({ domain });
+      const analysis = transformUpstreamPayload(domain, upstream);
+      const summary = buildFormatSummaryData(analysis, "Search Ads");
+      const summaryText = buildFormatSummaryText(domain, summary);
 
       return {
         content: [{ type: "text", text: summaryText }],
-        structuredContent: enriched,
+        structuredContent: summary,
       };
     } catch (err: any) {
       const message =

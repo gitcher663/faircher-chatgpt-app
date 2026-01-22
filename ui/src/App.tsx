@@ -1,31 +1,33 @@
+import { useEffect, useState } from "react";
 import { AdsSummaryOutput } from "./types";
 import AdsSummaryCard from "./components/AdsSummaryCard";
-import DistributionBar from "./components/DistributionBar";
-import AdvertisersTable from "./components/AdvertisersTable";
 import EmptyState from "./components/EmptyState";
 
 export default function App() {
   const data = (window as any).openai?.toolOutput as AdsSummaryOutput | null;
+  const initialDetails =
+    (window as any).openai?.widgetState?.showDetails ?? true;
+  const [showDetails, setShowDetails] = useState<boolean>(initialDetails);
+
+  useEffect(() => {
+    (window as any).openai?.setWidgetState?.({ showDetails });
+  }, [showDetails]);
 
   if (!data) {
     return null;
   }
 
-  if (data.summary.is_running_ads === false) {
+  if (data.advertising_activity_snapshot.status === "Inactive") {
     return <EmptyState />;
   }
 
   return (
     <div>
-      <AdsSummaryCard summary={data.summary} domain={data.domain} />
-
-      {data.distribution && (
-        <DistributionBar formats={data.distribution.formats} />
-      )}
-
-      {data.advertisers.length > 0 && (
-        <AdvertisersTable advertisers={data.advertisers} />
-      )}
+      <AdsSummaryCard
+        data={data}
+        showDetails={showDetails}
+        onToggleDetails={() => setShowDetails(prev => !prev)}
+      />
     </div>
   );
 }
