@@ -134,7 +134,7 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
         minimalTools[tool.definition.name] = {
           name: tool.definition.name,
           description: tool.definition.description,
-          input_schema: tool.definition.inputSchema
+          inputSchema: tool.definition.inputSchema
         };
       }
 
@@ -155,13 +155,13 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
     }
 
     /* --------------------------------------------------------------
-       MCP tools/list — MATCHES initialize EXACTLY
+       MCP tools/list — MUST MATCH initialize EXACTLY
        -------------------------------------------------------------- */
     if (method === "tools/list") {
       const list = Object.values(tools).map(t => ({
         name: t.definition.name,
         description: t.definition.description,
-        input_schema: t.definition.inputSchema
+        inputSchema: t.definition.inputSchema
       }));
 
       return reply({ tools: list });
