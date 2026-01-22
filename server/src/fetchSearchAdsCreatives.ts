@@ -23,7 +23,7 @@ export async function fetchSearchAds(
     region: "US",
     time_period: normalizeTimePeriod("last_365_days"),
     ad_format: "text",          // 🔒 THIS is the key: SEARCH ADS ONLY
-    num: "200"
+    num: "100"
   });
 
   if (args.domain) params.set("domain", args.domain);
