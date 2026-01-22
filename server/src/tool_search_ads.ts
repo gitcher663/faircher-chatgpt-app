@@ -2,6 +2,7 @@ import { normalizeDomain } from "./normalize";
 import { fetchAdsByFormat } from "./fetchAdsByFormat";
 import { transformAdsByFormat } from "./transform_ads_by_format";
 import { enrichAdsByFormatWithDetails } from "./enrich_ads_by_format";
+import { buildFormatSummary } from "./summary_builder";
 
 function buildErrorResult(domain: string | null, message: string) {
   return {
@@ -47,10 +48,7 @@ export function registerFairCherSearchAdsTool() {
       const data = transformAdsByFormat(domain, "text", upstream, 10);
       const enriched = await enrichAdsByFormatWithDetails(data);
 
-      const summaryText =
-        enriched.total_creatives === 0
-          ? `No recent search ads were found for ${domain} in the last 30 days.`
-          : `Found ${enriched.total_creatives} recent search ads for ${domain} in the last 30 days.`;
+      const summaryText = buildFormatSummary(enriched);
 
       return {
         content: [{ type: "text", text: summaryText }],
