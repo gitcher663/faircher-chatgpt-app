@@ -1,4 +1,5 @@
 import type { UpstreamAdsPayload } from "./upstream";
+import { normalizeTimePeriod } from "./time_period";
 
 export type AdFormat = "text" | "image" | "video";
 
@@ -28,7 +29,7 @@ export async function fetchAdsByFormat(
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
     domain: args.domain,
-    time_period: "last_365_days",
+    time_period: normalizeTimePeriod("last_365_days"),
     ad_format: adFormat,
     num: String(args.num ?? 200),
     region: "US",
