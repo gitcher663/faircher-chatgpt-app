@@ -35,7 +35,7 @@ export async function fetchAdvertiserSearch(query: string): Promise<AdvertiserSe
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center_advertiser_search",
     q: query,
-    region: "ANYWHERE",
+    region: "US",
     num_advertisers: "5",
     num_domains: "0"
   });

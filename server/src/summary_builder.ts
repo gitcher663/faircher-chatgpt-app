@@ -1,163 +1,445 @@
-import type { AdsByFormatEnrichedResponse } from "./transform_ads_by_format";
+import { differenceInDays, parseISO } from "date-fns";
+import type { AdsAnalysis, CanonicalAdFormat } from "./ads_analysis";
+import { ANALYSIS_WINDOW } from "./ads_analysis";
 
-type DomainSummaryData = {
+export type FormatSpecificSummary = {
+  format: CanonicalAdFormat;
+  analysis_window_days: number;
+  region: string;
+  total_ads_detected: number;
+  share_of_total_activity: number;
+  activity_pattern: "Always-on" | "Seasonal" | "Burst-driven";
+  sales_signal_strength: "Weak" | "Moderate" | "Strong";
+};
+
+export type SellerSummary = {
   domain: string;
-  summary: {
-    is_running_ads: boolean;
-    total_ads_found: number;
-    active_advertisers: number;
-    primary_advertiser: string | null;
-    confidence: number;
+  advertising_activity_snapshot: {
+    status: "Active" | "Inactive" | "Inactive (Historical Buyer)";
+    confidence_level: "Low" | "Medium" | "High";
+    analysis_window_days: number;
+    region: string;
+    sales_signal_strength: "Weak" | "Moderate" | "Strong";
+    total_ads_detected: number;
   };
-  activity: {
-    first_seen: string;
-    last_seen: string;
-    is_recent: boolean;
-    ad_lifespan_days: number;
-  } | null;
-  distribution: {
-    formats: Record<"text" | "image" | "video", number>;
-  } | null;
-  advertisers: Array<{
-    name: string;
-    ad_count_estimate: number;
-    is_primary: boolean;
+  advertising_behavior_profile: {
+    advertising_intensity: "Low" | "Moderate" | "High";
+    strategy_orientation: "Performance-driven" | "Brand-led" | "Mixed";
+    campaign_continuity: "Short-term" | "Long-running";
+    format_sophistication: "Low" | "Moderate" | "High";
+    experimentation_level: "Limited" | "Moderate" | "Aggressive";
+  };
+  activity_timeline: {
+    first_observed: string | null;
+    most_recent_activity: string | null;
+    ad_longevity_days: number | null;
+    always_on_presence: "Yes" | "No";
+  };
+  ad_format_mix: Array<{
+    format: CanonicalAdFormat;
+    count: number;
+    share: number;
   }>;
+  campaign_stability_signals: {
+    average_ad_lifespan_days: number | null;
+    creative_rotation: "Low" | "Moderate" | "High";
+    burst_activity_detected: "Yes" | "No";
+    volatility_index: "Low" | "Medium" | "High";
+  };
+  advertiser_scale: {
+    scale_classification: "Local" | "Regional" | "National";
+    geographic_focus: "Single-market" | "Multi-market" | "Nationwide";
+    buying_complexity: "Simple" | "Moderate" | "Advanced";
+  };
+  estimated_monthly_media_spend: {
+    spend_tier:
+      | "$500 – $10,000 / month"
+      | "$10,001 – $20,000 / month"
+      | "$20,001 – $100,000 / month"
+      | "$100,000+ / month";
+  };
+  spend_adequacy: {
+    relative_investment_level:
+      | "Underinvested"
+      | "Appropriately Invested"
+      | "Overextended";
+    consistency_vs_scale: "Low" | "Moderate" | "High";
+    growth_headroom: "Limited" | "Moderate" | "Significant";
+  };
+  spend_posture: {
+    commitment_level: "Experimental" | "Sustained" | "Aggressive";
+    scaling_pattern: "Flat" | "Seasonal" | "Accelerating";
+    risk_profile: "Conservative" | "Balanced" | "Aggressive";
+  };
+  sales_interpretation: {
+    sell_with_opportunity: string;
+    sell_against_opportunity: string;
+    outreach_recommendation: string;
+  };
+  data_scope: {
+    geography: string;
+    lookback_window_days: number;
+    source: string;
+  };
 };
 
-type Intensity = {
-  label: "High" | "Medium" | "Low";
-  bar: string;
-};
-
-const BAR_SIZE = 10;
-
-function toBar(value: number, max: number): Intensity {
-  if (max <= 0) {
-    return { label: "Low", bar: "█".repeat(1).padEnd(BAR_SIZE, "░") };
+function percent(count: number, total: number): number {
+  if (total <= 0) {
+    return 0;
   }
 
-  const ratio = Math.max(0, Math.min(1, value / max));
-  const filled = Math.max(1, Math.round(ratio * BAR_SIZE));
-  const bar = "█".repeat(filled).padEnd(BAR_SIZE, "░");
-
-  if (ratio >= 0.67) {
-    return { label: "High", bar };
-  }
-
-  if (ratio >= 0.34) {
-    return { label: "Medium", bar };
-  }
-
-  return { label: "Low", bar };
+  return Number(((count / total) * 100).toFixed(1));
 }
 
-function overallSignal(count: number): "High" | "Medium" | "Low" {
-  if (count >= 20) {
-    return "High";
-  }
-
-  if (count >= 5) {
-    return "Medium";
-  }
-
-  return "Low";
-}
-
-function varianceRisk(signal: "High" | "Medium" | "Low"): "Low" | "Moderate" | "High" {
-  if (signal === "High") {
+function confidenceLevel(totalAds: number): "Low" | "Medium" | "High" {
+  if (totalAds < 5) {
     return "Low";
   }
 
-  if (signal === "Medium") {
+  if (totalAds < 15) {
+    return "Medium";
+  }
+
+  return "High";
+}
+
+function salesSignalStrength(
+  totalAds: number
+): "Weak" | "Moderate" | "Strong" {
+  if (totalAds < 5) {
+    return "Weak";
+  }
+
+  if (totalAds < 20) {
+    return "Moderate";
+  }
+
+  return "Strong";
+}
+
+function advertisingIntensity(totalAds: number): "Low" | "Moderate" | "High" {
+  if (totalAds < 5) {
+    return "Low";
+  }
+
+  if (totalAds < 20) {
     return "Moderate";
   }
 
   return "High";
 }
 
-function formatLabel(format: "text" | "image" | "video"): "Search" | "Display" | "Streaming" {
-  if (format === "text") {
-    return "Search";
+function strategyOrientation(
+  formats: Record<CanonicalAdFormat, number>,
+  totalAds: number
+): "Performance-driven" | "Brand-led" | "Mixed" {
+  if (totalAds === 0) {
+    return "Mixed";
   }
 
-  if (format === "image") {
-    return "Display";
+  const searchShare = percent(formats["Search Ads"], totalAds);
+  const brandShare = percent(
+    formats["Display Ads"] + formats["Video Ads"],
+    totalAds
+  );
+
+  if (searchShare >= 60) {
+    return "Performance-driven";
   }
 
-  return "Streaming";
+  if (brandShare >= 60) {
+    return "Brand-led";
+  }
+
+  return "Mixed";
 }
 
-function formatsDetected(formats: Record<"text" | "image" | "video", number> | null): string {
-  if (!formats) {
-    return "None";
+function campaignContinuity(adLongevityDays: number | null): "Short-term" | "Long-running" {
+  if (!adLongevityDays || adLongevityDays < 180) {
+    return "Short-term";
   }
 
-  const detected = (Object.entries(formats) as Array<["text" | "image" | "video", number]>)
-    .filter(([, count]) => count > 0)
-    .map(([format]) => formatLabel(format));
-
-  return detected.length > 0 ? detected.join(" • ") : "None";
+  return "Long-running";
 }
 
-function formatMixLines(
-  formats: Record<"text" | "image" | "video", number> | null
-): string[] {
-  const counts = formats ?? { text: 0, image: 0, video: 0 };
-  const maxCount = Math.max(counts.text, counts.image, counts.video, 0);
-
-  return ([
-    { label: "Streaming", count: counts.video },
-    { label: "Search", count: counts.text },
-    { label: "Display", count: counts.image },
-  ] as const).map(item => {
-    const intensity = toBar(item.count, maxCount);
-    return `- ${item.label}: ${intensity.bar} ${intensity.label}`;
-  });
-}
-
-function channelIntensityLines(
-  formats: Record<"text" | "image" | "video", number> | null
-): string[] {
-  const counts = formats ?? { text: 0, image: 0, video: 0 };
-  const maxCount = Math.max(counts.text, counts.image, counts.video, 0);
-  const entries = [
-    { label: "Streaming", count: counts.video },
-    { label: "Search", count: counts.text },
-    { label: "Display", count: counts.image },
-  ];
-
-  return entries.map(entry => {
-    const intensity = toBar(entry.count, maxCount);
-    return `- ${entry.label}: ${intensity.label}`;
-  });
-}
-
-function spendRange(count: number): { range: string; confidence: "Low" | "Medium" | "Medium–High" } {
-  if (count >= 30) {
-    return { range: "$75k – $200k", confidence: "Medium–High" };
+function formatSophistication(
+  formats: Record<CanonicalAdFormat, number>,
+  totalAds: number
+): "Low" | "Moderate" | "High" {
+  if (totalAds < 5) {
+    return "Low";
   }
 
-  if (count >= 10) {
-    return { range: "$25k – $75k", confidence: "Medium" };
+  const activeFormats = Object.values(formats).filter(count => count > 0).length;
+
+  if (activeFormats >= 3) {
+    return "High";
   }
 
-  return { range: "$5k – $25k", confidence: "Low" };
+  if (activeFormats === 2) {
+    return "Moderate";
+  }
+
+  return "Low";
 }
 
-function formatExecutionLabel(format: "text" | "image" | "video"): string {
-  if (format === "text") {
-    return "Search: Keyword Breadth";
+function experimentationLevel(totalAds: number): "Limited" | "Moderate" | "Aggressive" {
+  if (totalAds < 10) {
+    return "Limited";
   }
 
-  if (format === "image") {
-    return "Display: Variant Diversity";
+  if (totalAds < 30) {
+    return "Moderate";
   }
 
-  return "Streaming: Creative Rotation";
+  return "Aggressive";
 }
 
-function toDateString(value: string | null): string | null {
+function activityPattern(
+  adLongevityDays: number | null,
+  lastSeenDaysAgo: number | null,
+  totalAds: number
+): "Always-on" | "Seasonal" | "Burst-driven" {
+  if (totalAds === 0) {
+    return "Burst-driven";
+  }
+
+  if (adLongevityDays !== null && adLongevityDays >= 200 && lastSeenDaysAgo !== null && lastSeenDaysAgo <= 30) {
+    return "Always-on";
+  }
+
+  if (adLongevityDays !== null && adLongevityDays >= 90) {
+    return "Seasonal";
+  }
+
+  return "Burst-driven";
+}
+
+function averageLifespanDays(ads: AdsAnalysis["ads"]): number | null {
+  const lifespans = ads
+    .map(ad => {
+      const first = parseISO(ad.first_seen);
+      const last = parseISO(ad.last_seen);
+      if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) {
+        return null;
+      }
+      return differenceInDays(last, first);
+    })
+    .filter((value): value is number => value !== null);
+
+  if (lifespans.length === 0) {
+    return null;
+  }
+
+  return Math.round(lifespans.reduce((sum, value) => sum + value, 0) / lifespans.length);
+}
+
+function creativeRotation(totalAds: number): "Low" | "Moderate" | "High" {
+  if (totalAds >= 30) {
+    return "High";
+  }
+
+  if (totalAds >= 10) {
+    return "Moderate";
+  }
+
+  return "Low";
+}
+
+function burstDetected(adLongevityDays: number | null, totalAds: number): "Yes" | "No" {
+  if (adLongevityDays !== null && adLongevityDays < 60 && totalAds >= 5) {
+    return "Yes";
+  }
+
+  return "No";
+}
+
+function volatilityIndex(
+  status: SellerSummary["advertising_activity_snapshot"]["status"],
+  burst: "Yes" | "No"
+): "Low" | "Medium" | "High" {
+  if (burst === "Yes") {
+    return "High";
+  }
+
+  if (status !== "Active") {
+    return "Medium";
+  }
+
+  return "Low";
+}
+
+function advertiserScale(totalAds: number): SellerSummary["advertiser_scale"]["scale_classification"] {
+  if (totalAds >= 40) {
+    return "National";
+  }
+
+  if (totalAds >= 15) {
+    return "Regional";
+  }
+
+  return "Local";
+}
+
+function geographicFocus(
+  scale: SellerSummary["advertiser_scale"]["scale_classification"]
+): SellerSummary["advertiser_scale"]["geographic_focus"] {
+  if (scale === "National") {
+    return "Nationwide";
+  }
+
+  if (scale === "Regional") {
+    return "Multi-market";
+  }
+
+  return "Single-market";
+}
+
+function buyingComplexity(
+  formatLevel: SellerSummary["advertising_behavior_profile"]["format_sophistication"]
+): SellerSummary["advertiser_scale"]["buying_complexity"] {
+  if (formatLevel === "High") {
+    return "Advanced";
+  }
+
+  if (formatLevel === "Moderate") {
+    return "Moderate";
+  }
+
+  return "Simple";
+}
+
+function spendTier(totalAds: number): SellerSummary["estimated_monthly_media_spend"]["spend_tier"] {
+  if (totalAds >= 60) {
+    return "$100,000+ / month";
+  }
+
+  if (totalAds >= 30) {
+    return "$20,001 – $100,000 / month";
+  }
+
+  if (totalAds >= 10) {
+    return "$10,001 – $20,000 / month";
+  }
+
+  return "$500 – $10,000 / month";
+}
+
+function relativeInvestmentLevel(
+  scale: SellerSummary["advertiser_scale"]["scale_classification"],
+  totalAds: number
+): SellerSummary["spend_adequacy"]["relative_investment_level"] {
+  if (scale === "Local" && totalAds >= 60) {
+    return "Overextended";
+  }
+
+  if (scale === "National" && totalAds < 30) {
+    return "Underinvested";
+  }
+
+  if (scale === "Regional" && totalAds < 15) {
+    return "Underinvested";
+  }
+
+  if (totalAds >= 10) {
+    return "Appropriately Invested";
+  }
+
+  return "Underinvested";
+}
+
+function consistencyVsScale(
+  status: SellerSummary["advertising_activity_snapshot"]["status"],
+  adLongevityDays: number | null,
+  totalAds: number
+): "Low" | "Moderate" | "High" {
+  if (status === "Active" && adLongevityDays !== null && adLongevityDays >= 180) {
+    return "High";
+  }
+
+  if (totalAds >= 5) {
+    return "Moderate";
+  }
+
+  return "Low";
+}
+
+function growthHeadroom(
+  investmentLevel: SellerSummary["spend_adequacy"]["relative_investment_level"]
+): SellerSummary["spend_adequacy"]["growth_headroom"] {
+  if (investmentLevel === "Underinvested") {
+    return "Significant";
+  }
+
+  if (investmentLevel === "Overextended") {
+    return "Limited";
+  }
+
+  return "Moderate";
+}
+
+function commitmentLevel(
+  totalAds: number,
+  status: SellerSummary["advertising_activity_snapshot"]["status"],
+  adLongevityDays: number | null
+): SellerSummary["spend_posture"]["commitment_level"] {
+  if (totalAds >= 40) {
+    return "Aggressive";
+  }
+
+  if (status === "Active" && adLongevityDays !== null && adLongevityDays >= 120) {
+    return "Sustained";
+  }
+
+  return "Experimental";
+}
+
+function scalingPattern(
+  burst: "Yes" | "No",
+  adLongevityDays: number | null
+): SellerSummary["spend_posture"]["scaling_pattern"] {
+  if (burst === "Yes") {
+    return "Seasonal";
+  }
+
+  if (adLongevityDays !== null && adLongevityDays >= 200) {
+    return "Flat";
+  }
+
+  return "Accelerating";
+}
+
+function riskProfile(
+  investmentLevel: SellerSummary["spend_adequacy"]["relative_investment_level"],
+  commitment: SellerSummary["spend_posture"]["commitment_level"]
+): SellerSummary["spend_posture"]["risk_profile"] {
+  if (investmentLevel === "Overextended" || commitment === "Aggressive") {
+    return "Aggressive";
+  }
+
+  if (investmentLevel === "Underinvested") {
+    return "Conservative";
+  }
+
+  return "Balanced";
+}
+
+function statusFromLastSeen(
+  totalAds: number,
+  lastSeenDaysAgo: number | null
+): SellerSummary["advertising_activity_snapshot"]["status"] {
+  if (totalAds === 0) {
+    return "Inactive";
+  }
+
+  if (lastSeenDaysAgo !== null && lastSeenDaysAgo > 30) {
+    return "Inactive (Historical Buyer)";
+  }
+
+  return "Active";
+}
+
+function toDate(value: string | null): string | null {
   if (!value) {
     return null;
   }
@@ -170,209 +452,262 @@ function toDateString(value: string | null): string | null {
   return parsed.toISOString().slice(0, 10);
 }
 
-function summarizeCreativeSignals(data: AdsByFormatEnrichedResponse): string[] {
-  const total = data.total_creatives;
-  const variationsCount = data.creatives.map(creative => creative.variations?.length ?? 0);
-  const avgVariations = variationsCount.length
-    ? variationsCount.reduce((sum, count) => sum + count, 0) / variationsCount.length
-    : 0;
-  const variationIntensity = avgVariations >= 3 ? "High" : avgVariations >= 1.5 ? "Medium" : "Low";
-  const hasCTA = data.creatives.some(creative =>
-    (creative.variations ?? []).some(variation => Boolean(variation.call_to_action))
-  );
-  const hasText = data.creatives.some(creative =>
-    (creative.variations ?? []).some(variation => Boolean(variation.title || variation.snippet))
-  );
-  const hasImages = data.creatives.some(creative =>
-    (creative.variations ?? []).some(variation => Boolean(variation.image || variation.images?.length))
-  );
-  const hasVideo = data.creatives.some(creative =>
-    (creative.variations ?? []).some(variation => Boolean(variation.video_id || variation.video_link))
-  );
-
-  return [
-    `- Distinct creatives observed: ${total}`,
-    `- Variation density: ${variationIntensity}`,
-    `- Call-to-action usage: ${hasCTA ? "Detected" : "Not detected"}`,
-    `- Text signal: ${hasText ? "Detected" : "Not detected"}`,
-    `- Image signal: ${hasImages ? "Detected" : "Not detected"}`,
-    `- Video signal: ${hasVideo ? "Detected" : "Not detected"}`,
-  ];
+function buildSalesInterpretation(
+  scale: SellerSummary["advertiser_scale"]["scale_classification"],
+  spendTierLabel: SellerSummary["estimated_monthly_media_spend"]["spend_tier"],
+  formatLevel: SellerSummary["advertising_behavior_profile"]["format_sophistication"],
+  activityPatternLabel: FormatSpecificSummary["activity_pattern"]
+): SellerSummary["sales_interpretation"] {
+  return {
+    sell_with_opportunity: `Position as a ${scale.toLowerCase()} buyer with ${spendTierLabel} signals and ${formatLevel.toLowerCase()} format depth.`,
+    sell_against_opportunity: `Highlight competitive coverage gaps when activity shifts ${activityPatternLabel.toLowerCase()} and reinforce share-of-voice protection.`,
+    outreach_recommendation: `Package inventory bundles matched to ${scale.toLowerCase()} scale, balancing always-on coverage with flexible bursts.`,
+  };
 }
 
-function summarizeExecutionObservations(data: AdsByFormatEnrichedResponse): string[] {
-  const firstSeen = data.creatives
-    .map(creative => toDateString(creative.first_shown_datetime))
-    .filter(Boolean) as string[];
-  const lastSeen = data.creatives
-    .map(creative => toDateString(creative.last_shown_datetime))
-    .filter(Boolean) as string[];
-  const earliest = firstSeen.length ? firstSeen.sort()[0] : "Unknown";
-  const latest = lastSeen.length ? lastSeen.sort().slice(-1)[0] : "Unknown";
-  const durationValues = data.creatives
-    .map(creative => creative.duration)
-    .filter((value): value is number => typeof value === "number");
-  const avgDuration = durationValues.length
-    ? Math.round(durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length)
+export function buildSellerSummary(analysis: AdsAnalysis): SellerSummary {
+  const totalAds = analysis.total_ads;
+  const status = statusFromLastSeen(totalAds, analysis.last_seen_days_ago);
+  const adLongevity = analysis.ad_lifespan_days;
+  const pattern = activityPattern(adLongevity, analysis.last_seen_days_ago, totalAds);
+
+  const formatMix = (Object.entries(analysis.formats) as Array<
+    [CanonicalAdFormat, number]
+  >)
+    .filter(([, count]) => count > 0)
+    .map(([format, count]) => ({
+      format,
+      count,
+      share: percent(count, totalAds),
+    }));
+
+  const formatLevel = formatSophistication(analysis.formats, totalAds);
+  const scale = advertiserScale(totalAds);
+  const spendTierLabel = spendTier(totalAds);
+  const investmentLevel = relativeInvestmentLevel(scale, totalAds);
+  const burst = burstDetected(adLongevity, totalAds);
+
+  return {
+    domain: analysis.domain,
+    advertising_activity_snapshot: {
+      status,
+      confidence_level: confidenceLevel(totalAds),
+      analysis_window_days: ANALYSIS_WINDOW.days,
+      region: ANALYSIS_WINDOW.region,
+      sales_signal_strength: salesSignalStrength(totalAds),
+      total_ads_detected: totalAds,
+    },
+    advertising_behavior_profile: {
+      advertising_intensity: advertisingIntensity(totalAds),
+      strategy_orientation: strategyOrientation(analysis.formats, totalAds),
+      campaign_continuity: campaignContinuity(adLongevity),
+      format_sophistication: formatLevel,
+      experimentation_level: experimentationLevel(totalAds),
+    },
+    activity_timeline: {
+      first_observed: toDate(analysis.first_seen),
+      most_recent_activity: toDate(analysis.last_seen),
+      ad_longevity_days: adLongevity,
+      always_on_presence:
+        status === "Active" && adLongevity !== null && adLongevity >= 180
+          ? "Yes"
+          : "No",
+    },
+    ad_format_mix: formatMix,
+    campaign_stability_signals: {
+      average_ad_lifespan_days: averageLifespanDays(analysis.ads),
+      creative_rotation: creativeRotation(totalAds),
+      burst_activity_detected: burst,
+      volatility_index: volatilityIndex(status, burst),
+    },
+    advertiser_scale: {
+      scale_classification: scale,
+      geographic_focus: geographicFocus(scale),
+      buying_complexity: buyingComplexity(formatLevel),
+    },
+    estimated_monthly_media_spend: {
+      spend_tier: spendTierLabel,
+    },
+    spend_adequacy: {
+      relative_investment_level: investmentLevel,
+      consistency_vs_scale: consistencyVsScale(status, adLongevity, totalAds),
+      growth_headroom: growthHeadroom(investmentLevel),
+    },
+    spend_posture: {
+      commitment_level: commitmentLevel(totalAds, status, adLongevity),
+      scaling_pattern: scalingPattern(burst, adLongevity),
+      risk_profile: riskProfile(investmentLevel, commitmentLevel(totalAds, status, adLongevity)),
+    },
+    sales_interpretation: buildSalesInterpretation(
+      scale,
+      spendTierLabel,
+      formatLevel,
+      pattern
+    ),
+    data_scope: {
+      geography: "United States",
+      lookback_window_days: ANALYSIS_WINDOW.days,
+      source: ANALYSIS_WINDOW.source,
+    },
+  };
+}
+
+export function buildDomainSummaryText(summary: SellerSummary): string {
+  const snapshot = summary.advertising_activity_snapshot;
+  const behavior = summary.advertising_behavior_profile;
+  const timeline = summary.activity_timeline;
+  const stability = summary.campaign_stability_signals;
+  const scale = summary.advertiser_scale;
+  const spend = summary.estimated_monthly_media_spend;
+  const adequacy = summary.spend_adequacy;
+  const posture = summary.spend_posture;
+  const sales = summary.sales_interpretation;
+
+  const formatMap = new Map(
+    summary.ad_format_mix.map(row => [row.format, row] as const)
+  );
+  const baseFormats: CanonicalAdFormat[] = [
+    "Search Ads",
+    "Video Ads",
+    "Display Ads",
+  ];
+  const formatRows = [
+    ...baseFormats.map(format => {
+      const row = formatMap.get(format);
+      return `| ${format} | ${row?.count ?? 0} | ${row?.share ?? 0}% |`;
+    }),
+    ...(formatMap.has("Other Ads")
+      ? [
+          `| Other Ads | ${formatMap.get("Other Ads")?.count ?? 0} | ${
+            formatMap.get("Other Ads")?.share ?? 0
+          }% |`,
+        ]
+      : []),
+  ];
+
+  return [
+    `## Advertising Activity Snapshot — ${summary.domain}`,
+    "",
+    `Status: ${snapshot.status}`,
+    `Confidence Level: ${snapshot.confidence_level}`,
+    `Analysis Window: Last ${snapshot.analysis_window_days} days (${snapshot.region})`,
+    `Sales Signal Strength: ${snapshot.sales_signal_strength}`,
+    `Total Ads Detected: ${snapshot.total_ads_detected}`,
+    "",
+    "## Advertising Behavior Profile",
+    "",
+    `- Advertising Intensity: ${behavior.advertising_intensity}`,
+    `- Strategy Orientation: ${behavior.strategy_orientation}`,
+    `- Campaign Continuity: ${behavior.campaign_continuity}`,
+    `- Format Sophistication: ${behavior.format_sophistication}`,
+    `- Experimentation Level: ${behavior.experimentation_level}`,
+    "",
+    "## Activity Timeline",
+    "",
+    `- First Observed: ${timeline.first_observed ?? "Not available"}`,
+    `- Most Recent Activity: ${timeline.most_recent_activity ?? "Not available"}`,
+    `- Ad Longevity: ~${timeline.ad_longevity_days ?? 0} days`,
+    `- Always-On Presence: ${timeline.always_on_presence}`,
+    "",
+    "## Ad Format Mix (365-Day View)",
+    "",
+    "| Format | Count | Share |",
+    "|-------------|------:|------:|",
+    ...formatRows,
+    "",
+    "## Campaign Stability Signals",
+    "",
+    `- Average Ad Lifespan: ${stability.average_ad_lifespan_days ?? 0} days`,
+    `- Creative Rotation: ${stability.creative_rotation}`,
+    `- Burst Activity Detected: ${stability.burst_activity_detected}`,
+    `- Volatility Index: ${stability.volatility_index}`,
+    "",
+    "## Advertiser Scale (Inferred)",
+    "",
+    `- Scale Classification: ${scale.scale_classification}`,
+    `- Geographic Focus: ${scale.geographic_focus}`,
+    `- Buying Complexity: ${scale.buying_complexity}`,
+    "",
+    "## Estimated Monthly Media Spend (Inferred)",
+    "",
+    `- Spend Tier: ${spend.spend_tier}`,
+    "",
+    "## Spend Adequacy (Relative to Scale)",
+    "",
+    `- Relative Investment Level: ${adequacy.relative_investment_level}`,
+    `- Consistency vs Scale: ${adequacy.consistency_vs_scale}`,
+    `- Growth Headroom: ${adequacy.growth_headroom}`,
+    "",
+    "## Spend Posture (Inferred)",
+    "",
+    `- Commitment Level: ${posture.commitment_level}`,
+    `- Scaling Pattern: ${posture.scaling_pattern}`,
+    `- Risk Profile: ${posture.risk_profile}`,
+    "",
+    "## Sales Interpretation (Faircher)",
+    "",
+    `- Sell-With Opportunity: ${sales.sell_with_opportunity}`,
+    `- Sell-Against Opportunity: ${sales.sell_against_opportunity}`,
+    `- Outreach / Packaging Recommendation: ${sales.outreach_recommendation}`,
+    "",
+    "## Data Scope & Source",
+    "",
+    `- Geography: United States`,
+    `- Lookback Window: ${summary.data_scope.lookback_window_days} days`,
+    `- Source: ${summary.data_scope.source}`,
+  ].join("\n");
+}
+
+export function buildFormatSummaryData(
+  analysis: AdsAnalysis,
+  format: CanonicalAdFormat
+): FormatSpecificSummary {
+  const totalAds = analysis.total_ads;
+  const formatAds = analysis.ads.filter(ad => ad.format === format);
+  const formatTotal = formatAds.length;
+  const firstSeen = formatAds.length
+    ? formatAds
+        .map(ad => parseISO(ad.first_seen))
+        .reduce((min, date) => (date < min ? date : min))
     : null;
+  const lastSeen = formatAds.length
+    ? formatAds
+        .map(ad => parseISO(ad.last_seen))
+        .reduce((max, date) => (date > max ? date : max))
+    : null;
+  const longevity =
+    firstSeen && lastSeen ? differenceInDays(lastSeen, firstSeen) : null;
+  const lastSeenDaysAgo = lastSeen ? differenceInDays(new Date(), lastSeen) : null;
 
-  return [
-    `- First observed: ${earliest}`,
-    `- Most recent activity: ${latest}`,
-    `- Average creative duration: ${avgDuration !== null ? `${avgDuration}s` : "Not available"}`,
-  ];
+  return {
+    format,
+    analysis_window_days: ANALYSIS_WINDOW.days,
+    region: ANALYSIS_WINDOW.region,
+    total_ads_detected: formatTotal,
+    share_of_total_activity: percent(formatTotal, totalAds),
+    activity_pattern: activityPattern(longevity, lastSeenDaysAgo, formatTotal),
+    sales_signal_strength: salesSignalStrength(formatTotal),
+  };
 }
 
-export function buildDomainSummary(data: DomainSummaryData): string {
-  const formats = data.distribution?.formats ?? null;
-  const signal = overallSignal(data.summary.total_ads_found);
-  const formatLines = formatMixLines(formats).join("\n");
-  const channelLines = channelIntensityLines(formats).join("\n");
-  const detectedFormats = formatsDetected(formats);
-  const shouldIncludeSpend = signal !== "Low" && data.summary.total_ads_found > 0;
-  const spend = spendRange(data.summary.total_ads_found);
-
-  const highLevelSignals = [
-    `- Active advertisers: ${data.summary.active_advertisers}`,
-    `- Primary advertiser: ${data.summary.primary_advertiser ?? "Unknown"}`,
-    `- Recent activity: ${data.activity?.is_recent ? "Yes" : "No"}`,
-    `- Total ads detected: ${data.summary.total_ads_found}`,
-  ].join("\n");
-
-  const advertiserConcentration = data.advertisers.slice(0, 3).map(advertiser => advertiser.name);
-
-  const recommendedActions = [
-    "- Validate format allocation against stated campaign objectives",
-    "- Confirm whether primary advertisers align to brand ownership",
-    "- Monitor recent activity cadence for budget pacing shifts",
-  ].join("\n");
-
-  const spendSection = shouldIncludeSpend
-    ? [
-        "## Estimated Media Investment (Modeled)",
-        "",
-        `**Estimated Monthly Spend:** ${spend.range}`,
-        `**Confidence:** ${spend.confidence}`,
-        "**Scope:** National",
-        "",
-      ].join("\n")
-    : "";
-
-  const confidenceSection = [
-    "## Confidence Assessment",
-    "",
-    `- Signal Strength: ${signal}`,
-    `- Data Persistence: ${data.activity?.is_recent ? "Sustained" : "Intermittent"}`,
-    `- Variance Risk: ${varianceRisk(signal)}`,
-    "",
-  ].join("\n");
-
+export function buildFormatSummaryText(
+  domain: string,
+  summary: FormatSpecificSummary
+): string {
   return [
-    "## FairCher Domain Overview",
+    `## Format Activity Snapshot — ${domain}`,
     "",
-    `**Brand:** ${data.domain}`,
-    `**Domain:** ${data.domain}`,
-    "**Campaign Scope:** Unknown",
-    `**Formats Detected:** ${detectedFormats}`,
-    `**Overall Signal:** ${signal} Activity`,
+    `- Format: ${summary.format}`,
+    `- Analysis Window: Last ${summary.analysis_window_days} days (${summary.region})`,
+    `- Total Ads Detected: ${summary.total_ads_detected}`,
+    `- Share of Total Activity: ${summary.share_of_total_activity}%`,
+    `- Activity Pattern: ${summary.activity_pattern}`,
+    `- Sales Signal Strength: ${summary.sales_signal_strength}`,
     "",
-    "## Format Mix Overview",
+    "## Seller Guidance",
     "",
-    formatLines,
-    "",
-    "## Channel Intensity",
-    "",
-    channelLines,
-    "",
-    "## High-Level Signals",
-    "",
-    highLevelSignals,
-    "",
-    spendSection,
-    confidenceSection,
-    "## Recommended Actions",
-    "",
-    recommendedActions,
-    "",
-    advertiserConcentration.length > 0
-      ? `- Primary advertiser concentration: ${advertiserConcentration.join(", ")}`
-      : "- Primary advertiser concentration: Not available",
-    "",
-    "## Methodology Note",
-    "",
-    "*Methodology Note: All spend figures are modeled estimates based on observed advertising activity and industry benchmarks. They represent directional investment ranges, not actual reported spend.*",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function buildFormatSummary(data: AdsByFormatEnrichedResponse): string {
-  const signal = overallSignal(data.total_creatives);
-  const intensity = toBar(data.total_creatives, Math.max(data.total_creatives, 1));
-  const detectedFormat = formatLabel(data.ad_format);
-  const shouldIncludeSpend = signal !== "Low" && data.total_creatives > 0;
-  const spend = spendRange(data.total_creatives);
-
-  const creativeSignals = summarizeCreativeSignals(data).join("\n");
-  const executionObservations = summarizeExecutionObservations(data).join("\n");
-  const executionLabel = formatExecutionLabel(data.ad_format);
-  const recommendedActions = [
-    "- Audit format execution depth against competitive benchmarks",
-    "- Identify opportunities to increase variant diversity",
-    "- Align creative cadence with observed activity windows",
+    "- Align inventory packages to the observed format share and cadence.",
+    "- Treat burst-heavy patterns as short-term opportunities for sponsorships or seasonal bundles.",
+    "- Reinforce always-on formats with continuity guarantees and premium placement options.",
   ].join("\n");
-
-  const spendSection = shouldIncludeSpend
-    ? [
-        "## Estimated Media Investment (Modeled)",
-        "",
-        `**Estimated Monthly Spend:** ${spend.range}`,
-        `**Confidence:** ${spend.confidence}`,
-        "**Scope:** National",
-        "",
-      ].join("\n")
-    : "";
-
-  const confidenceSection = [
-    "## Confidence Assessment",
-    "",
-    `- Signal Strength: ${signal}`,
-    "- Data Persistence: Intermittent",
-    `- Variance Risk: ${varianceRisk(signal)}`,
-    "",
-  ].join("\n");
-
-  return [
-    "## FairCher Domain Overview",
-    "",
-    `**Brand:** ${data.domain}`,
-    `**Domain:** ${data.domain}`,
-    "**Campaign Scope:** Unknown",
-    `**Formats Detected:** ${detectedFormat}`,
-    `**Overall Signal:** ${signal} Activity`,
-    "",
-    "## Format Execution Intensity",
-    "",
-    `- ${executionLabel} ${intensity.bar} ${intensity.label}`,
-    "",
-    "## Creative / Copy Signals",
-    "",
-    creativeSignals,
-    "",
-    "## Execution Observations",
-    "",
-    executionObservations,
-    "",
-    spendSection,
-    confidenceSection,
-    "## Recommended Actions",
-    "",
-    recommendedActions,
-    "",
-    "## Methodology Note",
-    "",
-    "*Methodology Note: All spend figures are modeled estimates based on observed advertising activity and industry benchmarks. They represent directional investment ranges, not actual reported spend.*",
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
