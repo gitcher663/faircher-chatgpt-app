@@ -8,7 +8,7 @@ export type UpstreamAdsPayload = {
     domain?: string;
     advertiser_id?: string;
     time_period?: string;
-    ad_format?: "text" | "image" | "video";
+    ad_format?: "text" | "image" | "video" | "all";
   };
   search_information?: {
     total_results?: number;
@@ -52,9 +52,10 @@ export async function fetchUpstreamAds(
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
     domain: args.domain,
-    time_period: "last_30_days",
-    num: "100",
-    region: "ANYWHERE"
+    time_period: "last_365_days",
+    ad_format: "all",
+    num: "200",
+    region: "US"
   });
 
   const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {

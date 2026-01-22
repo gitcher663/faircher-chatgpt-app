@@ -19,10 +19,10 @@ export async function fetchSearchAds(
 
   const params = new URLSearchParams({
     engine: "google_ads_transparency_center",
-    region: "ANYWHERE",
-    time_period: "last_30_days",
+    region: "US",
+    time_period: "last_365_days",
     ad_format: "text",          // 🔒 THIS is the key: SEARCH ADS ONLY
-    num: "50"
+    num: "200"
   });
 
   if (args.domain) params.set("domain", args.domain);
