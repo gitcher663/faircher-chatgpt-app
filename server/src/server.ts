@@ -71,6 +71,24 @@ app.get("/health", (_req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* MCP discovery (REQUIRED FOR TOOL SCAN) */
+/* ------------------------------------------------------------------ */
+
+app.get("/.well-known/mcp.json", (_req, res) => {
+  res.json({
+    protocolVersion: "2024-11-05",
+    serverInfo: {
+      name: "faircher-mcp",
+      version: "1.0.0",
+    },
+    transport: {
+      type: "sse",
+      endpoint: "/sse",
+    },
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Helpers */
 /* ------------------------------------------------------------------ */
 
@@ -167,17 +185,37 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
       return rpcError(-32600, "Invalid Request");
     }
 
+    /* -------------------------------------------------------------- */
+    /* MCP: initialize (ADVERTISE TOOLS — REQUIRED FOR SCAN) */
+    /* -------------------------------------------------------------- */
+
     if (method === "initialize") {
+      const advertisedTools: Record<string, unknown> = {};
+
+      for (const tool of Object.values(tools)) {
+        advertisedTools[tool.definition.name] = {
+          description: tool.definition.description,
+          inputSchema: tool.definition.inputSchema,
+          _meta: tool.definition._meta ?? {},
+        };
+      }
+
       return reply({
         protocolVersion: "2024-11-05",
         serverInfo: { name: "faircher-mcp", version: "1.0.0" },
-        capabilities: { tools: {} },
+        capabilities: {
+          tools: advertisedTools,
+        },
       });
     }
 
     if (method === "notifications/initialized") {
       return reply({ ok: true });
     }
+
+    /* -------------------------------------------------------------- */
+    /* MCP: tools/list */
+    /* -------------------------------------------------------------- */
 
     if (method === "tools/list") {
       const definitions = Object.values(tools)
@@ -186,6 +224,10 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
 
       return reply({ tools: definitions });
     }
+
+    /* -------------------------------------------------------------- */
+    /* MCP: tools/call */
+    /* -------------------------------------------------------------- */
 
     if (method === "tools/call") {
       const name = params?.name;
