@@ -63,6 +63,13 @@ export type SellerSummary = {
   };
 };
 
+export type FormatSpecificSummary = {
+  format: CanonicalAdFormat;
+  surface: AdSurface;
+  count: number;
+  share: number;
+};
+
 /* ============================================================================
    Helpers
 ============================================================================ */
@@ -186,6 +193,33 @@ export function buildSellerSummary(analysis: AdsAnalysis): SellerSummary {
       source: ANALYSIS_WINDOW.source,
     },
   };
+}
+
+export function buildDomainSummaryText(summary: SellerSummary): string {
+  const status = summary.activity_snapshot.status;
+  const confidence = summary.activity_snapshot.confidence;
+  const totalAds = summary.activity_snapshot.total_ads_detected;
+  const spendLevel = summary.inferred_spend.level;
+  const posture = summary.sales_guidance.posture;
+  const signals = summary.channel_signal_profile;
+
+  const channels = [
+    signals.has_search ? "search" : null,
+    signals.has_display ? "display" : null,
+    signals.has_programmatic_video ? "programmatic video" : null,
+    signals.has_youtube ? "YouTube" : null,
+    signals.has_ctv ? "CTV" : null,
+  ].filter(Boolean);
+
+  const channelText =
+    channels.length > 0 ? channels.join(", ") : "no channels";
+
+  return [
+    `${summary.domain} is ${status} with ${confidence.toLowerCase()} confidence.`,
+    `Detected ${totalAds} ads across ${channelText}.`,
+    `Spend signal: ${spendLevel}. Sales posture: ${posture}.`,
+    summary.sales_guidance.opportunity_signal,
+  ].join(" ");
 }
 
 /* ============================================================================
