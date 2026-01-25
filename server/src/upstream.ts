@@ -1,11 +1,37 @@
 import { normalizeDomain } from "./normalize";
 import { normalizeTimePeriod } from "./time_period";
 
+/**
+ * upstream.ts
+ *
+ * PURPOSE
+ * -------
+ * Fetches vendor advertising payloads and attaches
+ * explicit platform intent for downstream normalization.
+ *
+ * This file is:
+ * - Vendor-aware
+ * - Platform-aware
+ * - Inference-free
+ *
+ * It MUST be the only place where platform intent is defined.
+ */
+
+export type PlatformHint =
+  | "youtube"
+  | "programmatic"
+  | "ctv"
+  | "unknown";
+
 export type UpstreamAdsPayload = {
+  /** 🔑 Added explicitly by fetch layer */
+  platform_hint?: PlatformHint;
+
   search_metadata?: {
     status?: string;
     request_url?: string;
   };
+
   search_parameters?: {
     engine?: string;
     domain?: string;
@@ -14,9 +40,11 @@ export type UpstreamAdsPayload = {
     ad_format?: "text" | "image" | "video" | "all";
     platform?: string;
   };
+
   search_information?: {
     total_results?: number;
   };
+
   ad_creatives?: Array<{
     id?: string;
     format?: "text" | "image" | "video";
@@ -29,6 +57,7 @@ export type UpstreamAdsPayload = {
     target_domain?: string;
     details_link?: string;
   }>;
+
   pagination?: {
     next_page_token?: string;
   };
@@ -36,20 +65,33 @@ export type UpstreamAdsPayload = {
 
 type FetchArgs = {
   domain: string;
+
+  /**
+   * Explicit platform intent.
+   * MUST be set by caller.
+   */
+  platform_hint?: PlatformHint;
 };
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
 const DEFAULT_PAGE_LIMIT = 10;
 
+/* ------------------------------------------------------------------
+   Helpers
+------------------------------------------------------------------ */
+
 function normalizeStatus(status?: string): string {
   return (status ?? "").trim().toLowerCase();
 }
+
+/* ------------------------------------------------------------------
+   Single-page fetch
+------------------------------------------------------------------ */
 
 export async function fetchUpstreamAds(
   args: FetchArgs
 ): Promise<UpstreamAdsPayload> {
   const apiKey = process.env.UPSTREAM_API_KEY;
-
   if (!apiKey) {
     throw new Error("Missing UPSTREAM_API_KEY");
   }
@@ -61,13 +103,13 @@ export async function fetchUpstreamAds(
     domain,
     time_period: normalizeTimePeriod("last_365_days"),
     num: "100",
-    region: "US"
+    region: "US",
   });
 
   const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
     headers: {
-      Authorization: `Bearer ${apiKey}`
-    }
+      Authorization: `Bearer ${apiKey}`,
+    },
   });
 
   if (!response.ok) {
@@ -76,6 +118,9 @@ export async function fetchUpstreamAds(
   }
 
   const json = (await response.json()) as UpstreamAdsPayload;
+
+  /** ✅ Attach platform intent HERE */
+  json.platform_hint = args.platform_hint ?? "unknown";
 
   const status = normalizeStatus(json.search_metadata?.status);
   if (status && status !== "success") {
@@ -88,23 +133,21 @@ export async function fetchUpstreamAds(
     json.ad_creatives = [];
   }
 
-  if (!json.search_metadata && json.ad_creatives.length === 0) {
-    throw new Error(
-      "SearchAPI payload missing expected fields (no metadata, no ads)"
-    );
-  }
-
   return json;
 }
+
+/* ------------------------------------------------------------------
+   Paginated fetch
+------------------------------------------------------------------ */
 
 type SearchParams = Record<string, string | number | undefined>;
 
 export async function fetchAllPages(
   baseUrl: string,
-  params: SearchParams
+  params: SearchParams,
+  platform_hint: PlatformHint = "unknown"
 ): Promise<UpstreamAdsPayload[]> {
   const apiKey = process.env.UPSTREAM_API_KEY;
-
   if (!apiKey) {
     throw new Error("Missing UPSTREAM_API_KEY");
   }
@@ -114,10 +157,13 @@ export async function fetchAllPages(
 
   for (let page = 0; page < DEFAULT_PAGE_LIMIT; page += 1) {
     const searchParams = new URLSearchParams();
+
     for (const [key, value] of Object.entries(params)) {
-      if (value === undefined) continue;
-      searchParams.set(key, String(value));
+      if (value !== undefined) {
+        searchParams.set(key, String(value));
+      }
     }
+
     if (nextPageToken) {
       searchParams.set("page_token", nextPageToken);
     }
@@ -136,7 +182,9 @@ export async function fetchAllPages(
     }
 
     const json = (await response.json()) as UpstreamAdsPayload;
-    pages.push(json);
+
+    /** ✅ Attach platform intent to every page */
+    json.platform_hint = platform_hint;
 
     const status = normalizeStatus(json.search_metadata?.status);
     if (status && status !== "success") {
@@ -145,10 +193,10 @@ export async function fetchAllPages(
       );
     }
 
+    pages.push(json);
+
     nextPageToken = json.pagination?.next_page_token;
-    if (!nextPageToken) {
-      break;
-    }
+    if (!nextPageToken) break;
   }
 
   return pages;
