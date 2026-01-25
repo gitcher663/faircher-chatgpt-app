@@ -1,124 +1,250 @@
+import type { JSONSchema7 } from "json-schema";
 import { normalizeDomain } from "./normalize";
-import { fetchUpstreamAds } from "./upstream";
-import { transformUpstreamPayload } from "./transform";
-import { buildDomainSummaryText, buildSellerSummary } from "./summary_builder";
+import { fetchAllPages } from "./upstream";
+import { analyzeAds } from "./ads_analysis";
+import {
+  buildSellerSummary,
+  buildDomainSummaryText,
+} from "./summary_builder";
 
-/**
- * MCP requires a top-level `content` array.
- * This helper guarantees schema validity on every return path.
- */
-function mcpText(text: string) {
-  return {
-    content: [
-      {
-        type: "text",
-        text
-      }
-    ]
-  };
-}
+/* ============================================================================
+   Tool Types
+   ============================================================================ */
 
 export type ToolDefinition = {
   name: string;
   description: string;
-  inputSchema: any;
-  securitySchemes?: Array<{ type: string; scopes?: string[] }>;
-  annotations?: {
-    readOnlyHint?: boolean;
-    openWorldHint?: boolean;
-    destructiveHint?: boolean;
-  };
-  _meta?: Record<string, unknown>;
+  inputSchema: JSONSchema7;
 };
 
-export type ToolHandler = (args: any) => Promise<any>;
+export type ToolRuntime = {
+  definition: ToolDefinition;
+  run: (args: any) => Promise<any>;
+};
 
-export type ToolRegistry = Record<
-  string,
-  {
-    definition: ToolDefinition;
-    run: ToolHandler;
+export type ToolRegistry = Record<string, ToolRuntime>;
+
+/* ============================================================================
+   Constants
+   ============================================================================ */
+
+const DEFAULT_LOOKBACK_DAYS = 365;
+const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
+const BUILTWITH_API_BASE = "https://api.builtwith.com/v21/api.json";
+
+/* ============================================================================
+   Time helpers (SearchAPI only)
+   ============================================================================ */
+
+function computeTimePeriod(lookbackDays: number): string {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - lookbackDays);
+
+  const fromStr = from.toISOString().slice(0, 10);
+  const toStr = to.toISOString().slice(0, 10);
+
+  return `${fromStr}..${toStr}`;
+}
+
+/* ============================================================================
+   Upstream fetchers (NO interpretation here)
+   ============================================================================ */
+
+async function fetchDisplayAds(domain: string, timePeriod: string) {
+  return fetchAllPages(SEARCH_API_BASE, {
+    engine: "google_ads_transparency_center",
+    domain,
+    ad_format: "image",
+    num: 100,
+    time_period: timePeriod,
+  });
+}
+
+async function fetchSearchAds(domain: string, timePeriod: string) {
+  return fetchAllPages(SEARCH_API_BASE, {
+    engine: "google_ads_transparency_center",
+    domain,
+    ad_format: "text",
+    num: 100,
+    time_period: timePeriod,
+  });
+}
+
+async function fetchYouTubeAds(domain: string, timePeriod: string) {
+  return fetchAllPages(SEARCH_API_BASE, {
+    engine: "google_ads_transparency_center",
+    domain,
+    platform: "youtube",
+    ad_format: "video",
+    num: 100,
+    time_period: timePeriod,
+  });
+}
+
+async function fetchNonYouTubeVideoAds(domain: string, timePeriod: string) {
+  return fetchAllPages(SEARCH_API_BASE, {
+    engine: "google_ads_transparency_center",
+    domain,
+    ad_format: "video",
+    num: 100,
+    time_period: timePeriod,
+    // NOTE: non-YouTube filtering is inferred downstream
+  });
+}
+
+async function fetchLinkedInAds(advertiser: string) {
+  return fetchAllPages(SEARCH_API_BASE, {
+    engine: "linkedin_ad_library",
+    advertiser,
+    time_period: "last_year",
+  });
+}
+
+async function fetchBuiltWith(domain: string) {
+  const url =
+    `${BUILTWITH_API_BASE}` +
+    `?KEY=${process.env.BUILTWITH_KEY}` +
+    `&LOOKUP=${domain}` +
+    `&NOPII=yes` +
+    `&NOMETA=yes` +
+    `&NOATTR=yes`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`BuiltWith error: ${res.status}`);
   }
->;
+  return res.json();
+}
+
+/* ============================================================================
+   Tool Registration
+   ============================================================================ */
 
 export function registerFairCherTool(): ToolRegistry {
-  const definition: ToolDefinition = {
-    name: "faircher_domain_ads_summary",
-    description:
-      "Summarized advertising activity for a domain with seller-facing spend, behavior, and format insights.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        domain: {
-          type: "string",
-          description: "A root domain like example.com"
-        }
-      },
-      required: ["domain"],
-      additionalProperties: false
-    },
-    annotations: {
-      readOnlyHint: true,
-      openWorldHint: false,
-      destructiveHint: false
-    },
-    securitySchemes: [{ type: "noauth" }],
-    _meta: {
-      securitySchemes: [{ type: "noauth" }],
-      "openai/outputTemplate": "ui://faircher/ads-summary.html",
-      "openai/widgetAccessible": true,
-      "openai/visibility": "public",
-      "openai/toolInvocation/invoking": "Analyzing ad activity…",
-      "openai/toolInvocation/invoked": "Seller summary ready"
-    }
-  };
-
-  const run: ToolHandler = async (args: any) => {
-    try {
-      // 1. Normalize + validate input
-      const domain = String(args?.domain || "");
-      const normalizedDomain = normalizeDomain(domain);
-
-      // 2. Fetch upstream data (SearchAPI / FairCher backend)
-      const upstream = await fetchUpstreamAds({ domain: normalizedDomain });
-
-      // 3. Transform into canonical summary schema
-      const analysis = transformUpstreamPayload(normalizedDomain, upstream);
-      const summary = buildSellerSummary(analysis);
-
-      // 4. Generate a structured FairCher summary
-      const summaryText = buildDomainSummaryText(summary);
-
-      // 🔒 HARD MCP INVARIANT — NEVER return empty / non-string text
-      if (!summaryText || typeof summaryText !== "string") {
-        throw new Error("Invariant violation: summaryText must be a non-empty string");
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: summaryText
-          }
-        ],
-        structuredContent: summary,
-        _meta: {
-          "openai/outputTemplate": "ui://faircher/ads-summary.html"
-        }
-      };
-    } catch (err: any) {
-      // 5. Defensive error handling — NEVER return raw errors
-      return mcpText(
-        `Unable to retrieve advertising data for the requested domain. ` +
-        `Reason: ${err?.message ?? "Unknown error."}`
-      );
-    }
-  };
-
   return {
-    [definition.name]: {
-      definition,
-      run
-    }
+    faircher_advertising_intelligence: {
+      definition: {
+        name: "faircher_advertising_intelligence",
+        description:
+          "Returns consolidated advertising intelligence for a domain, including search, display, video, CTV, paid social, and advertising infrastructure signals.",
+        inputSchema: {
+          type: "object",
+          required: ["domain"],
+          properties: {
+            domain: {
+              type: "string",
+              description: "Apex domain (e.g. example.com)",
+            },
+            advertiser: {
+              type: "string",
+              description:
+                "Optional advertiser name (used for LinkedIn Ad Library). If omitted, domain will be used as a best-effort fallback.",
+            },
+            lookback_days: {
+              type: "number",
+              description: "Number of days to look back (default: 365)",
+              default: DEFAULT_LOOKBACK_DAYS,
+            },
+            include_builtwith: {
+              type: "boolean",
+              description:
+                "Include advertising infrastructure detection (BuiltWith)",
+              default: true,
+            },
+          },
+        },
+      },
+
+      /* ======================================================================
+         Runtime
+         ====================================================================== */
+
+      async run(args: {
+        domain: string;
+        advertiser?: string;
+        lookback_days?: number;
+        include_builtwith?: boolean;
+      }) {
+        const lookbackDays = args.lookback_days ?? DEFAULT_LOOKBACK_DAYS;
+        const includeBuiltWith = args.include_builtwith !== false;
+
+        // Normalize only what SHOULD be normalized
+        const domain = normalizeDomain(args.domain);
+
+        // LinkedIn advertiser handling (explicit)
+        const advertiser = args.advertiser ?? domain;
+
+        const timePeriod = computeTimePeriod(lookbackDays);
+
+        /* --------------------------------------------------------------
+           Fetch creative-level advertising data
+           -------------------------------------------------------------- */
+
+        const [
+          displayAds,
+          searchAds,
+          youtubeAds,
+          videoAdsRaw,
+          linkedInAds,
+        ] = await Promise.all([
+          fetchDisplayAds(domain, timePeriod),
+          fetchSearchAds(domain, timePeriod),
+          fetchYouTubeAds(domain, timePeriod),
+          fetchNonYouTubeVideoAds(domain, timePeriod),
+          fetchLinkedInAds(advertiser),
+        ]);
+
+        /* --------------------------------------------------------------
+           Advertising infrastructure intelligence (BuiltWith)
+           -------------------------------------------------------------- */
+
+        const builtWith = includeBuiltWith
+          ? await fetchBuiltWith(domain)
+          : null;
+
+        /* --------------------------------------------------------------
+           Analysis (facts only)
+           -------------------------------------------------------------- */
+
+        const analysis = analyzeAds({
+          domain,
+          displayAds,
+          searchAds,
+          youtubeAds,
+          videoAds: videoAdsRaw,
+          linkedInAds,
+          builtWith, // LinkedIn Ads may ALSO be detected here
+        });
+
+        /* --------------------------------------------------------------
+           Interpretation & presentation
+           -------------------------------------------------------------- */
+
+        const sellerSummary = buildSellerSummary(analysis);
+        const summaryText = buildDomainSummaryText(sellerSummary);
+
+        /* --------------------------------------------------------------
+           Final tool output
+           -------------------------------------------------------------- */
+
+        return {
+          structured: sellerSummary,
+          summary: summaryText,
+          meta: {
+            analysis_window_days: lookbackDays,
+            advertiser_used_for_linkedin: advertiser,
+            sources: {
+              display_ads: displayAds.length,
+              search_ads: searchAds.length,
+              youtube_ads: youtubeAds.length,
+              video_ads: videoAdsRaw.length,
+              linkedin_ads: linkedInAds.length,
+              builtwith: builtWith ? "included" : "skipped",
+            },
+          },
+        };
+      },
+    },
   };
 }
