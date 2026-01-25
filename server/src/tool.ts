@@ -1,7 +1,7 @@
-import type { JSONSchema7 } from "json-schema";
 import { normalizeDomain } from "./normalize";
 import { fetchAllPages } from "./upstream";
 import { analyzeAds } from "./ads_analysis";
+import { normalizeAds } from "./normalize.ads";
 import {
   buildSellerSummary,
   buildDomainSummaryText,
@@ -16,6 +16,8 @@ export type ToolDefinition = {
   description: string;
   inputSchema: JSONSchema7;
 };
+
+type JSONSchema7 = Record<string, unknown>;
 
 export type ToolRuntime = {
   definition: ToolDefinition;
@@ -207,14 +209,27 @@ export function registerFairCherTool(): ToolRegistry {
            Analysis (facts only)
            -------------------------------------------------------------- */
 
+        const ads = [
+          ...displayAds.flatMap(upstream =>
+            normalizeAds({ upstream })
+          ),
+          ...searchAds.flatMap(upstream =>
+            normalizeAds({ upstream })
+          ),
+          ...youtubeAds.flatMap(upstream =>
+            normalizeAds({ upstream })
+          ),
+          ...videoAdsRaw.flatMap(upstream =>
+            normalizeAds({ upstream })
+          ),
+          ...linkedInAds.flatMap(upstream =>
+            normalizeAds({ upstream })
+          ),
+        ];
+
         const analysis = analyzeAds({
           domain,
-          displayAds,
-          searchAds,
-          youtubeAds,
-          videoAds: videoAdsRaw,
-          linkedInAds,
-          builtWith, // LinkedIn Ads may ALSO be detected here
+          ads,
         });
 
         /* --------------------------------------------------------------
@@ -235,11 +250,11 @@ export function registerFairCherTool(): ToolRegistry {
             analysis_window_days: lookbackDays,
             advertiser_used_for_linkedin: advertiser,
             sources: {
-              display_ads: displayAds.length,
-              search_ads: searchAds.length,
-              youtube_ads: youtubeAds.length,
-              video_ads: videoAdsRaw.length,
-              linkedin_ads: linkedInAds.length,
+              display_ads: countAds(displayAds),
+              search_ads: countAds(searchAds),
+              youtube_ads: countAds(youtubeAds),
+              video_ads: countAds(videoAdsRaw),
+              linkedin_ads: countAds(linkedInAds),
               builtwith: builtWith ? "included" : "skipped",
             },
           },
@@ -247,4 +262,11 @@ export function registerFairCherTool(): ToolRegistry {
       },
     },
   };
+}
+
+function countAds(pages: Array<{ ad_creatives?: Array<unknown> }>): number {
+  return pages.reduce(
+    (total, page) => total + (page.ad_creatives?.length ?? 0),
+    0
+  );
 }

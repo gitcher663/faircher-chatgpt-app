@@ -12,6 +12,7 @@ export type UpstreamAdsPayload = {
     advertiser_id?: string;
     time_period?: string;
     ad_format?: "text" | "image" | "video" | "all";
+    platform?: string;
   };
   search_information?: {
     total_results?: number;
@@ -38,6 +39,7 @@ type FetchArgs = {
 };
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
+const DEFAULT_PAGE_LIMIT = 10;
 
 function normalizeStatus(status?: string): string {
   return (status ?? "").trim().toLowerCase();
@@ -93,4 +95,61 @@ export async function fetchUpstreamAds(
   }
 
   return json;
+}
+
+type SearchParams = Record<string, string | number | undefined>;
+
+export async function fetchAllPages(
+  baseUrl: string,
+  params: SearchParams
+): Promise<UpstreamAdsPayload[]> {
+  const apiKey = process.env.UPSTREAM_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("Missing UPSTREAM_API_KEY");
+  }
+
+  const pages: UpstreamAdsPayload[] = [];
+  let nextPageToken: string | undefined;
+
+  for (let page = 0; page < DEFAULT_PAGE_LIMIT; page += 1) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined) continue;
+      searchParams.set(key, String(value));
+    }
+    if (nextPageToken) {
+      searchParams.set("page_token", nextPageToken);
+    }
+
+    const response = await fetch(`${baseUrl}?${searchParams.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `SearchAPI request failed (${response.status}): ${text}`
+      );
+    }
+
+    const json = (await response.json()) as UpstreamAdsPayload;
+    pages.push(json);
+
+    const status = normalizeStatus(json.search_metadata?.status);
+    if (status && status !== "success") {
+      throw new Error(
+        `SearchAPI returned non-success status: ${json.search_metadata?.status}`
+      );
+    }
+
+    nextPageToken = json.pagination?.next_page_token;
+    if (!nextPageToken) {
+      break;
+    }
+  }
+
+  return pages;
 }
