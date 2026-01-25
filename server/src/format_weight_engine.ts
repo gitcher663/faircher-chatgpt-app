@@ -1,137 +1,103 @@
-import type { CanonicalAdFormat } from "./ads_analysis";
-
-/* ============================================================================
-   Canonical format groups
-   ============================================================================ */
-
 /**
- * These map 1:1 with how you ingest data today.
- * Do NOT collapse these — separation is the signal.
+ * format_weight_engine.ts
+ *
+ * PURPOSE
+ * -------
+ * Converts normalized ad formats + platforms into a weighted activity score
+ * and spend signal tier.
+ *
+ * This file is the ONLY place where:
+ * - Video types are differentiated
+ * - CTV > YouTube > Programmatic Video is enforced
+ * - Signal stacking is evaluated
+ *
+ * No UI language. No sales phrasing.
  */
-export type WeightedAdChannel =
-  | "Search"
-  | "Display"
-  | "YouTubeVideo"
-  | "ProgrammaticVideo"
-  | "CTV";
 
-/* ============================================================================
-   Base weights (relative, not dollars)
-   ============================================================================ */
-
-/**
- * These weights reflect *buying power*, not impression volume.
- * They are intentionally conservative and tunable.
- */
-export const BASE_CHANNEL_WEIGHTS: Record<WeightedAdChannel, number> = {
-  Search: 0.5,
-  Display: 0.6,
-  ProgrammaticVideo: 1.0,
-  YouTubeVideo: 1.2,
-  CTV: 1.6,
-};
-
-/* ============================================================================
-   Stack multipliers (this is the real signal)
-   ============================================================================ */
-
-export function stackMultiplier(channels: Set<WeightedAdChannel>): number {
-  const hasCTV = channels.has("CTV");
-  const hasYT = channels.has("YouTubeVideo");
-  const hasVideo = channels.has("ProgrammaticVideo");
-
-  // Enterprise-grade signal
-  if (hasCTV && hasYT && hasVideo) return 1.6;
-
-  // Strong upper-mid signal
-  if ((hasCTV && hasVideo) || (hasCTV && hasYT)) return 1.4;
-
-  // Solid video buyer
-  if (hasVideo && hasYT) return 1.25;
-
-  // Single-channel only
-  return 1.0;
-}
-
-/* ============================================================================
-   Public scoring API
-   ============================================================================ */
+export type VideoSurface =
+  | "youtube"
+  | "programmatic_video"
+  | "ctv";
 
 export type FormatWeightInput = {
-  /**
-   * Count of ads per canonical format.
-   * Example:
-   * {
-   *   "Search Ads": 12,
-   *   "Video Ads": 8,
-   *   "CTV Ads": 4
-   * }
-   */
-  formats: Record<CanonicalAdFormat, number>;
-
-  /**
-   * Optional explicit channel flags if upstream provides them
-   * (e.g. BuiltWith, pixel detection).
-   */
-  detected_channels?: WeightedAdChannel[];
+  formats: {
+    search: number;
+    display: number;
+    youtube_video: number;
+    programmatic_video: number;
+    ctv: number;
+  };
 };
 
-export type FormatWeightResult = {
-  weighted_score: number;
-  normalized_level: "$" | "$$" | "$$$" | "$$$$";
-  channels_detected: WeightedAdChannel[];
-  stack_multiplier: number;
+export type WeightedSpendSignal = {
+  spend_level: "$" | "$$" | "$$$" | "$$$$";
+  activity_score: number;
+  signal_stack: Array<
+    "Search" | "Display" | "YouTube Video" | "Programmatic Video" | "CTV"
+  >;
 };
 
-/* ============================================================================
-   Core engine
-   ============================================================================ */
+/* ------------------------------------------------------------------ */
+/* Weights (locked + opinionated)                                      */
+/* ------------------------------------------------------------------ */
 
-export function computeFormatWeightedSpend(
+const WEIGHTS = {
+  search: 1.0,
+  display: 0.75,
+  youtube_video: 2.0,
+  programmatic_video: 2.5,
+  ctv: 4.0,
+};
+
+/* ------------------------------------------------------------------ */
+/* Public API                                                          */
+/* ------------------------------------------------------------------ */
+
+export function computeWeightedSpendSignal(
   input: FormatWeightInput
-): FormatWeightResult {
-  const channels = new Set<WeightedAdChannel>();
+): WeightedSpendSignal {
+  const { formats } = input;
 
-  // Infer channels from canonical formats
-  if (input.formats["Search Ads"] > 0) channels.add("Search");
-  if (input.formats["Display Ads"] > 0) channels.add("Display");
-  if (input.formats["Video Ads"] > 0) channels.add("ProgrammaticVideo");
-  if (input.formats["YouTube Ads"] > 0) channels.add("YouTubeVideo");
-  if (input.formats["CTV Ads"] > 0) channels.add("CTV");
-
-  // Merge explicit detections (BuiltWith, pixels, etc.)
-  input.detected_channels?.forEach(c => channels.add(c));
-
-  // Base weighted score
   let score = 0;
-  for (const channel of channels) {
-    score += BASE_CHANNEL_WEIGHTS[channel];
+  const signal_stack: WeightedSpendSignal["signal_stack"] = [];
+
+  if (formats.search > 0) {
+    score += formats.search * WEIGHTS.search;
+    signal_stack.push("Search");
   }
 
-  // Apply stack multiplier
-  const multiplier = stackMultiplier(channels);
-  const weightedScore = Number((score * multiplier).toFixed(2));
+  if (formats.display > 0) {
+    score += formats.display * WEIGHTS.display;
+    signal_stack.push("Display");
+  }
+
+  if (formats.youtube_video > 0) {
+    score += formats.youtube_video * WEIGHTS.youtube_video;
+    signal_stack.push("YouTube Video");
+  }
+
+  if (formats.programmatic_video > 0) {
+    score += formats.programmatic_video * WEIGHTS.programmatic_video;
+    signal_stack.push("Programmatic Video");
+  }
+
+  if (formats.ctv > 0) {
+    score += formats.ctv * WEIGHTS.ctv;
+    signal_stack.push("CTV");
+  }
+
+  const spend_level: WeightedSpendSignal["spend_level"] =
+    score < 5
+      ? "$"
+      : score < 15
+      ? "$$"
+      : score < 40
+      ? "$$$"
+      : "$$$$";
 
   return {
-    weighted_score: weightedScore,
-    normalized_level: normalizeSpendLevel(weightedScore),
-    channels_detected: Array.from(channels),
-    stack_multiplier: multiplier,
+    spend_level,
+    activity_score: Math.round(score * 10) / 10,
+    signal_stack,
   };
-}
-
-/* ============================================================================
-   Normalization (relative tiers only)
-   ============================================================================ */
-
-/**
- * IMPORTANT:
- * These thresholds are intentionally coarse.
- * Dollar mapping happens later, only in forecasting mode.
- */
-function normalizeSpendLevel(score: number): "$" | "$$" | "$$$" | "$$$$" {
-  if (score < 1.0) return "$";
-  if (score < 2.2) return "$$";
-  if (score < 3.5) return "$$$";
-  return "$$$$";
 }
