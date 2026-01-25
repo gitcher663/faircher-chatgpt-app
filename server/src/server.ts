@@ -2,10 +2,6 @@ import express from "express";
 import path from "path";
 
 import { registerFairCherTool, type ToolRegistry } from "./tool";
-import { registerFairCherLandingPageTool } from "./tool_landing_page";
-import { registerFairCherSearchAdsTool } from "./tool_search_ads";
-import { registerFairCherDisplayAdsTool } from "./tool_display_ads";
-import { registerFairCherStreamingAdsTool } from "./tool_streaming_ads";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -34,10 +30,6 @@ type RpcReply = {
 
 const tools: ToolRegistry = {
   ...registerFairCherTool(),
-  ...registerFairCherLandingPageTool(),
-  ...registerFairCherSearchAdsTool(),
-  ...registerFairCherDisplayAdsTool(),
-  ...registerFairCherStreamingAdsTool(),
 };
 
 /* ======================================================================
