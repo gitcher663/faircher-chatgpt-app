@@ -8,14 +8,14 @@ import { differenceInDays, parseISO, subDays } from "date-fns";
  * Aggregates normalized advertising signals into a neutral,
  * time-bounded activity model.
  *
- * This module is:
+ * This module is deliberately:
  * - Source-agnostic
  * - Vendor-agnostic
  * - Spend-agnostic
  * - Inference-free
  *
- * It deliberately preserves signal resolution so downstream
- * layers (weighting, forecasting, seller logic) can reason
+ * It preserves maximum signal resolution so downstream layers
+ * (format weighting, forecasting, seller logic, UI) can reason
  * without information loss.
  */
 
@@ -50,8 +50,8 @@ export type AdSurface =
 export type NormalizedAdSignal = {
   format: CanonicalAdFormat;
   surface: AdSurface;
-  first_seen: string; // ISO date
-  last_seen: string;  // ISO date
+  first_seen: string; // ISO 8601
+  last_seen: string;  // ISO 8601
 };
 
 /* ------------------------------------------------------------------
@@ -147,8 +147,9 @@ export function analyzeAds({ domain, ads }: AnalyzeAdsArgs): AdsAnalysis {
     by_format[ad.format] += 1;
     by_surface[ad.surface] += 1;
 
-    const key = `${ad.format}::${ad.surface}`;
-    by_format_surface[key] = (by_format_surface[key] ?? 0) + 1;
+    const compositeKey = `${ad.format}::${ad.surface}`;
+    by_format_surface[compositeKey] =
+      (by_format_surface[compositeKey] ?? 0) + 1;
 
     firstSeenDates.push(parseISO(ad.first_seen));
     lastSeenDates.push(parseISO(ad.last_seen));
