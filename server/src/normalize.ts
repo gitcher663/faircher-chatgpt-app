@@ -19,7 +19,7 @@ function isValidDomain(domain: string): boolean {
     return false;
   }
 
-  if (/[\/\s]/.test(domain) || domain.includes("http")) {
+  if (/[\/\s]/.test(domain)) {
     return false;
   }
 
