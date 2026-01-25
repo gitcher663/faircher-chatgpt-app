@@ -5,55 +5,83 @@ import { differenceInDays, parseISO, subDays } from "date-fns";
  *
  * PURPOSE
  * -------
- * This module aggregates already-normalized advertising signals into a
- * neutral, time-bounded activity shape. It is intentionally:
+ * Aggregates normalized advertising signals into a neutral,
+ * time-bounded activity model.
  *
- * - Source-agnostic (no Google, BuiltWith, or vendor logic)
- * - Technology-agnostic (no pixels, platforms, or partners)
- * - Sales-agnostic (no spend, confidence, or strategy inference)
+ * This module is:
+ * - Source-agnostic
+ * - Vendor-agnostic
+ * - Spend-agnostic
+ * - Inference-free
  *
- * It acts as the boundary between upstream detection/normalization and
- * downstream seller intelligence.
+ * It deliberately preserves signal resolution so downstream
+ * layers (weighting, forecasting, seller logic) can reason
+ * without information loss.
  */
 
-/* ------------------------------------------------------------------ */
-/* Canonical Formats                                                    */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Canonical Ad Formats (WHAT the ad is)
+------------------------------------------------------------------ */
 
 export type CanonicalAdFormat =
-  | "Search Ads"
-  | "Display Ads"
-  | "Video Ads"
-  | "Other Ads";
+  | "Search"
+  | "Display"
+  | "Video"
+  | "CTV"
+  | "Other";
 
-/* ------------------------------------------------------------------ */
-/* Normalized Input Shape                                               */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Delivery Surfaces (WHERE the ad runs)
+------------------------------------------------------------------ */
+
+export type AdSurface =
+  | "Search Network"
+  | "Programmatic Display"
+  | "Programmatic Video"
+  | "YouTube"
+  | "Connected TV"
+  | "Social Feed"
+  | "Other";
+
+/* ------------------------------------------------------------------
+   Normalized Input Signal
+------------------------------------------------------------------ */
 
 export type NormalizedAdSignal = {
   format: CanonicalAdFormat;
-  first_seen: string; // ISO date string
-  last_seen: string;  // ISO date string
+  surface: AdSurface;
+  first_seen: string; // ISO date
+  last_seen: string;  // ISO date
 };
 
-/* ------------------------------------------------------------------ */
-/* Analysis Output Shape                                                */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Analysis Output Shape
+------------------------------------------------------------------ */
 
 export type AdsAnalysis = {
   domain: string;
-  total_ads: number;
-  formats: Record<CanonicalAdFormat, number>;
+
+  totals: {
+    ads: number;
+  };
+
+  by_format: Record<CanonicalAdFormat, number>;
+  by_surface: Record<AdSurface, number>;
+  by_format_surface: Record<string, number>; // `${format}::${surface}`
+
   ads: NormalizedAdSignal[];
-  first_seen: string | null;
-  last_seen: string | null;
-  ad_lifespan_days: number | null;
-  last_seen_days_ago: number | null;
+
+  timeline: {
+    first_seen: string | null;
+    last_seen: string | null;
+    ad_lifespan_days: number | null;
+    last_seen_days_ago: number | null;
+  };
 };
 
-/* ------------------------------------------------------------------ */
-/* Analysis Window                                                      */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Analysis Window
+------------------------------------------------------------------ */
 
 const ANALYSIS_WINDOW_DAYS = 365;
 
@@ -63,53 +91,65 @@ export const ANALYSIS_WINDOW = {
   source: "Normalized Advertising Signals",
 };
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Helpers
+------------------------------------------------------------------ */
 
-function isValidISODate(value: string | undefined): value is string {
-  if (!value) {
-    return false;
-  }
+function isValidISODate(value?: string): value is string {
+  if (!value) return false;
   const parsed = parseISO(value);
   return !Number.isNaN(parsed.getTime());
 }
 
 function isWithinWindow(lastSeen: string): boolean {
-  const parsed = parseISO(lastSeen);
-  return parsed >= subDays(new Date(), ANALYSIS_WINDOW_DAYS);
+  return parseISO(lastSeen) >= subDays(new Date(), ANALYSIS_WINDOW_DAYS);
 }
 
-/* ------------------------------------------------------------------ */
-/* Public API                                                          */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Public API
+------------------------------------------------------------------ */
 
 type AnalyzeAdsArgs = {
   domain: string;
   ads: NormalizedAdSignal[];
 };
 
-export function analyzeAds({
-  domain,
-  ads,
-}: AnalyzeAdsArgs): AdsAnalysis {
+export function analyzeAds({ domain, ads }: AnalyzeAdsArgs): AdsAnalysis {
   const windowedAds = ads
     .filter(ad => isValidISODate(ad.first_seen))
     .filter(ad => isValidISODate(ad.last_seen))
     .filter(ad => isWithinWindow(ad.last_seen));
 
-  const formats: Record<CanonicalAdFormat, number> = {
-    "Search Ads": 0,
-    "Display Ads": 0,
-    "Video Ads": 0,
-    "Other Ads": 0,
+  const by_format: Record<CanonicalAdFormat, number> = {
+    Search: 0,
+    Display: 0,
+    Video: 0,
+    CTV: 0,
+    Other: 0,
   };
+
+  const by_surface: Record<AdSurface, number> = {
+    "Search Network": 0,
+    "Programmatic Display": 0,
+    "Programmatic Video": 0,
+    YouTube: 0,
+    "Connected TV": 0,
+    "Social Feed": 0,
+    Other: 0,
+  };
+
+  const by_format_surface: Record<string, number> = {};
 
   const firstSeenDates: Date[] = [];
   const lastSeenDates: Date[] = [];
 
   for (const ad of windowedAds) {
-    formats[ad.format] += 1;
+    by_format[ad.format] += 1;
+    by_surface[ad.surface] += 1;
+
+    const key = `${ad.format}::${ad.surface}`;
+    by_format_surface[key] = (by_format_surface[key] ?? 0) + 1;
+
     firstSeenDates.push(parseISO(ad.first_seen));
     lastSeenDates.push(parseISO(ad.last_seen));
   }
@@ -124,20 +164,26 @@ export function analyzeAds({
       ? new Date(Math.max(...lastSeenDates.map(d => d.getTime())))
       : null;
 
-  const adLifespanDays =
-    firstSeen && lastSeen ? differenceInDays(lastSeen, firstSeen) : null;
-
-  const lastSeenDaysAgo =
-    lastSeen ? differenceInDays(new Date(), lastSeen) : null;
-
   return {
     domain,
-    total_ads: windowedAds.length,
-    formats,
+
+    totals: {
+      ads: windowedAds.length,
+    },
+
+    by_format,
+    by_surface,
+    by_format_surface,
+
     ads: windowedAds,
-    first_seen: firstSeen ? firstSeen.toISOString() : null,
-    last_seen: lastSeen ? lastSeen.toISOString() : null,
-    ad_lifespan_days: adLifespanDays,
-    last_seen_days_ago: lastSeenDaysAgo,
+
+    timeline: {
+      first_seen: firstSeen ? firstSeen.toISOString() : null,
+      last_seen: lastSeen ? lastSeen.toISOString() : null,
+      ad_lifespan_days:
+        firstSeen && lastSeen ? differenceInDays(lastSeen, firstSeen) : null,
+      last_seen_days_ago:
+        lastSeen ? differenceInDays(new Date(), lastSeen) : null,
+    },
   };
 }
