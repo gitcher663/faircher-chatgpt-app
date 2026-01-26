@@ -199,31 +199,27 @@ export function registerFairCherTool(): ToolRegistry {
         },
       },
 
-      async run(args: { domain: string }): Promise<ToolOutput> {
+      async run(args: { domain: string }): Promise<any> {
         try {
           if (
             !args ||
             typeof args.domain !== "string" ||
             args.domain.trim().length === 0
           ) {
-            return buildToolError(
-              "invalid_domain",
-              "Domain must be a valid apex domain.",
-              { domain: args?.domain }
-            );
+            return {
+              content: buildToolError(
+                "invalid_domain",
+                "Domain must be a valid apex domain.",
+                { domain: args?.domain }
+              ),
+            };
           }
 
           const lookbackDays = DEFAULT_LOOKBACK_DAYS;
-
-          // BuiltWith is optional enrichment
           const includeBuiltWith = Boolean(process.env.BUILTWITH_KEY);
 
           const domain = normalizeDomain(args.domain);
           const timePeriod = computeTimePeriod(lookbackDays);
-
-          /* --------------------------------------------------------------
-             Fetch creative-level advertising data
-             -------------------------------------------------------------- */
 
           const [
             displayAds,
@@ -237,47 +233,23 @@ export function registerFairCherTool(): ToolRegistry {
             fetchNonYouTubeVideoAds(domain, timePeriod),
           ]);
 
-          /* --------------------------------------------------------------
-             Advertising infrastructure intelligence (BuiltWith – OPTIONAL)
-             -------------------------------------------------------------- */
-
-          let builtWith: unknown = null;
-
           if (includeBuiltWith) {
             try {
-              builtWith = await fetchBuiltWith(domain);
+              await fetchBuiltWith(domain);
             } catch (error) {
-              console.warn(
-                "BuiltWith enrichment failed; continuing without it",
-                {
-                  domain,
-                  cause:
-                    error instanceof Error ? error.message : "Unknown error",
-                }
-              );
-              builtWith = null;
+              console.warn("BuiltWith enrichment failed; continuing without it", {
+                domain,
+                cause:
+                  error instanceof Error ? error.message : "Unknown error",
+              });
             }
           }
 
-          void builtWith;
-
-          /* --------------------------------------------------------------
-             Analysis (facts only)
-             -------------------------------------------------------------- */
-
           const ads = [
-            ...displayAds.flatMap(upstream =>
-              normalizeAds({ upstream })
-            ),
-            ...searchAds.flatMap(upstream =>
-              normalizeAds({ upstream })
-            ),
-            ...youtubeAds.flatMap(upstream =>
-              normalizeAds({ upstream })
-            ),
-            ...videoAdsRaw.flatMap(upstream =>
-              normalizeAds({ upstream })
-            ),
+            ...displayAds.flatMap(upstream => normalizeAds({ upstream })),
+            ...searchAds.flatMap(upstream => normalizeAds({ upstream })),
+            ...youtubeAds.flatMap(upstream => normalizeAds({ upstream })),
+            ...videoAdsRaw.flatMap(upstream => normalizeAds({ upstream })),
           ];
 
           const analysis = analyzeAds({
@@ -285,30 +257,33 @@ export function registerFairCherTool(): ToolRegistry {
             ads,
           });
 
-          /* --------------------------------------------------------------
-             Tool output (structured data only)
-             -------------------------------------------------------------- */
-
           const sellerSummary = buildSellerSummary(analysis);
-          return sellerSummary;
+
+          return {
+            content: sellerSummary,
+          };
         } catch (error) {
           if (error instanceof ValidationError) {
-            return buildToolError(
-              "invalid_domain",
-              "Domain must be a valid apex domain.",
-              { domain: args?.domain }
-            );
+            return {
+              content: buildToolError(
+                "invalid_domain",
+                "Domain must be a valid apex domain.",
+                { domain: args?.domain }
+              ),
+            };
           }
 
-          return buildToolError(
-            "upstream_error",
-            "Upstream ads service unavailable.",
-            {
-              cause:
-                error instanceof Error ? error.message : "Unknown error",
-              retryable: true,
-            }
-          );
+          return {
+            content: buildToolError(
+              "upstream_error",
+              "Upstream ads service unavailable.",
+              {
+                cause:
+                  error instanceof Error ? error.message : "Unknown error",
+                retryable: true,
+              }
+            ),
+          };
         }
       },
     },
