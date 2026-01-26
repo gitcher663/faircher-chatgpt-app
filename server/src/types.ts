@@ -1,7 +1,6 @@
-import type { SellerSummary, FormatSpecificSummary } from "./summary_builder";
+import type { AdsSummary } from "./summary_builder";
 
-export type AdsSummaryResponse = SellerSummary;
-export type FormatSummaryResponse = FormatSpecificSummary;
+export type AdsSummaryResponse = AdsSummary;
 
 export type ToolInput = {
   domain: string;

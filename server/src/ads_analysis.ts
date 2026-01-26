@@ -88,7 +88,7 @@ const ANALYSIS_WINDOW_DAYS = 365;
 export const ANALYSIS_WINDOW = {
   days: ANALYSIS_WINDOW_DAYS,
   region: "US",
-  source: "Normalized Advertising Signals",
+  source: "Google Ads Transparency Center",
 };
 
 /* ------------------------------------------------------------------
