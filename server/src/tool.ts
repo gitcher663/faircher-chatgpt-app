@@ -86,6 +86,7 @@ async function fetchWithRetry(
         ...options,
         signal: controller.signal,
       });
+
       if (!response.ok && shouldRetryStatus(response.status)) {
         lastError = new Error(`Retryable status ${response.status}`);
       } else {
@@ -150,15 +151,6 @@ async function fetchNonYouTubeVideoAds(domain: string, timePeriod: string) {
     ad_format: "video",
     num: 100,
     time_period: timePeriod,
-    // NOTE: non-YouTube filtering is inferred downstream
-  });
-}
-
-async function fetchLinkedInAds(advertiser: string) {
-  return fetchAllPages(SEARCH_API_BASE, {
-    engine: "linkedin_ad_library",
-    advertiser,
-    time_period: "last_year",
   });
 }
 
@@ -167,6 +159,7 @@ async function fetchBuiltWith(domain: string) {
   if (!apiKey) {
     throw new Error("Missing BUILTWITH_KEY");
   }
+
   const url =
     `${BUILTWITH_API_BASE}` +
     `?KEY=${apiKey}` +
@@ -179,6 +172,7 @@ async function fetchBuiltWith(domain: string) {
   if (!res.ok) {
     throw new Error(`BuiltWith error: ${res.status}`);
   }
+
   return res.json();
 }
 
@@ -188,17 +182,11 @@ async function fetchBuiltWith(domain: string) {
 
 export function registerFairCherTool(): ToolRegistry {
   return {
-    // MCP discovery lifecycle: the host calls tools/list, then uses the tool
-    // name returned there when issuing tools/call. If the tool name in this
-    // registry does not match what ChatGPT expects, the model reports "no tools
-    // available" because MCP discovery never surfaces a compatible tool.
     faircher_domain_ads_summary: {
       definition: {
-        // Tool name must match docs/tool-spec.md exactly so tools/list exposes
-        // the contract ChatGPT is instructed to call.
         name: "faircher_domain_ads_summary",
         description:
-          "Returns consolidated advertising intelligence for a domain, including search, display, video, CTV, paid social, and advertising infrastructure signals.",
+          "Returns consolidated advertising intelligence for a domain, including search, display, video, CTV, and advertising infrastructure signals.",
         inputSchema: {
           type: "object",
           required: ["domain"],
@@ -210,10 +198,6 @@ export function registerFairCherTool(): ToolRegistry {
           },
         },
       },
-
-      /* ======================================================================
-         Runtime
-         ====================================================================== */
 
       async run(args: { domain: string }): Promise<ToolOutput> {
         try {
@@ -230,14 +214,11 @@ export function registerFairCherTool(): ToolRegistry {
           }
 
           const lookbackDays = DEFAULT_LOOKBACK_DAYS;
-          const includeBuiltWith = true;
 
-          // Normalize only what SHOULD be normalized
+          // BuiltWith is optional enrichment
+          const includeBuiltWith = Boolean(process.env.BUILTWITH_KEY);
+
           const domain = normalizeDomain(args.domain);
-
-          // LinkedIn advertiser handling (explicit)
-          const advertiser = domain;
-
           const timePeriod = computeTimePeriod(lookbackDays);
 
           /* --------------------------------------------------------------
@@ -249,22 +230,34 @@ export function registerFairCherTool(): ToolRegistry {
             searchAds,
             youtubeAds,
             videoAdsRaw,
-            linkedInAds,
           ] = await Promise.all([
             fetchDisplayAds(domain, timePeriod),
             fetchSearchAds(domain, timePeriod),
             fetchYouTubeAds(domain, timePeriod),
             fetchNonYouTubeVideoAds(domain, timePeriod),
-            fetchLinkedInAds(advertiser),
           ]);
 
           /* --------------------------------------------------------------
-             Advertising infrastructure intelligence (BuiltWith)
+             Advertising infrastructure intelligence (BuiltWith – OPTIONAL)
              -------------------------------------------------------------- */
 
-          const builtWith = includeBuiltWith
-            ? await fetchBuiltWith(domain)
-            : null;
+          let builtWith: unknown = null;
+
+          if (includeBuiltWith) {
+            try {
+              builtWith = await fetchBuiltWith(domain);
+            } catch (error) {
+              console.warn(
+                "BuiltWith enrichment failed; continuing without it",
+                {
+                  domain,
+                  cause:
+                    error instanceof Error ? error.message : "Unknown error",
+                }
+              );
+              builtWith = null;
+            }
+          }
 
           void builtWith;
 
@@ -285,9 +278,6 @@ export function registerFairCherTool(): ToolRegistry {
             ...videoAdsRaw.flatMap(upstream =>
               normalizeAds({ upstream })
             ),
-            ...linkedInAds.flatMap(upstream =>
-              normalizeAds({ upstream })
-            ),
           ];
 
           const analysis = analyzeAds({
@@ -299,28 +289,7 @@ export function registerFairCherTool(): ToolRegistry {
              Tool output (structured data only)
              -------------------------------------------------------------- */
 
-          // Output contract (success):
-          // - Returns AdsSummary JSON with required keys:
-          //   - domain: string
-          //   - advertising_activity_snapshot
-          //   - advertising_behavior_profile
-          //   - activity_timeline
-          //   - ad_format_mix
-          //   - campaign_stability_signals
-          //   - advertiser_scale
-          //   - estimated_monthly_media_spend
-          //   - spend_adequacy
-          //   - spend_posture
-          //   - sales_interpretation
-          //   - data_scope
-          //
-          // Output contract (error):
-          // - { error: { code, message, details? } }
           const sellerSummary = buildSellerSummary(analysis);
-
-          // The UI consumes window.openai.toolOutput as AdsSummaryOutput, so the
-          // MCP tools/call response must return the structured summary directly
-          // rather than wrapping it in { structured, summary, meta }.
           return sellerSummary;
         } catch (error) {
           if (error instanceof ValidationError) {
@@ -330,6 +299,7 @@ export function registerFairCherTool(): ToolRegistry {
               { domain: args?.domain }
             );
           }
+
           return buildToolError(
             "upstream_error",
             "Upstream ads service unavailable.",
