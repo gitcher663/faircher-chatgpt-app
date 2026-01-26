@@ -253,15 +253,19 @@ export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
   const videoAds = byFormat.Video + byFormat.CTV;
   const otherAds = byFormat.Other;
 
-  const formatMix = [
-    { format: "Search Ads", count: searchAds },
-    { format: "Display Ads", count: displayAds },
-    { format: "Video Ads", count: videoAds },
-    { format: "Other Ads", count: otherAds },
-  ].map(item => ({
-    ...item,
-    share: percent(item.count, totalAds),
-  }));
+  const formatMix: AdsSummary["ad_format_mix"] = (
+    [
+      { format: "Search Ads", count: searchAds },
+      { format: "Display Ads", count: displayAds },
+      { format: "Video Ads", count: videoAds },
+      { format: "Other Ads", count: otherAds },
+    ] as const
+  ).map(
+    (item): AdsSummary["ad_format_mix"][number] => ({
+      ...item,
+      share: percent(item.count, totalAds),
+    })
+  );
 
   const formatCount = [
     searchAds,
