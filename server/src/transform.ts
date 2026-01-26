@@ -1,6 +1,6 @@
 import type { UpstreamAdsPayload } from "./upstream";
 import { analyzeAds, ANALYSIS_WINDOW } from "./ads_analysis";
-import { normalizeAds } from "./normalize.ads";
+import { normalizeAds } from "./normalize_ads";
 
 export function transformUpstreamPayload(
   domain: string,

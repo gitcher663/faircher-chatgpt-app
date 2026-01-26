@@ -1,7 +1,7 @@
 import { normalizeDomain } from "./normalize";
 import { fetchAllPages } from "./upstream";
 import { analyzeAds } from "./ads_analysis";
-import { normalizeAds } from "./normalize.ads";
+import { normalizeAds } from "./normalize_ads";
 import { buildSellerSummary } from "./summary_builder";
 
 /* ============================================================================
