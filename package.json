@@ -2,7 +2,7 @@
   "name": "faircher-chatgpt-app",
   "private": true,
   "scripts": {
-    "build": "cd ui && npm install && npm run build && cd ../server && npm install && npm run build",
+    "build": "npm --prefix ui install && npm --prefix server install && npm --prefix ui run build && npm --prefix server run build",
     "start": "cd server && npm run start"
   }
 }

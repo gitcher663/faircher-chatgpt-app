@@ -1,59 +1,88 @@
 import { differenceInDays, parseISO } from "date-fns";
-import type {
-  AdsAnalysis,
-  CanonicalAdFormat,
-  AdSurface,
-} from "./ads_analysis";
+import type { AdsAnalysis } from "./ads_analysis";
 import { ANALYSIS_WINDOW } from "./ads_analysis";
 
 /* ============================================================================
    Types
 ============================================================================ */
 
-export type SpendLevel = "$" | "$$" | "$$$" | "$$$$";
+type IntensityLevel = "Low" | "Moderate" | "High";
+type ConfidenceLevel = "Low" | "Medium" | "High";
+type SalesSignalStrength = "Weak" | "Moderate" | "Strong";
 
-export type SellerSummary = {
+export type AdsSummary = {
   domain: string;
 
-  activity_snapshot: {
+  advertising_activity_snapshot: {
     status: "Active" | "Inactive" | "Inactive (Historical Buyer)";
-    confidence: "Low" | "Medium" | "High";
-    total_ads_detected: number;
+    confidence_level: ConfidenceLevel;
     analysis_window_days: number;
     region: string;
+    sales_signal_strength: SalesSignalStrength;
+    total_ads_detected: number;
   };
 
-  channel_signal_profile: {
-    has_search: boolean;
-    has_display: boolean;
-    has_programmatic_video: boolean;
-    has_youtube: boolean;
-    has_ctv: boolean;
-    multi_video_signal: boolean;
+  advertising_behavior_profile: {
+    advertising_intensity: IntensityLevel;
+    strategy_orientation: "Performance-driven" | "Brand-led" | "Mixed";
+    campaign_continuity: "Short-term" | "Long-running";
+    format_sophistication: IntensityLevel;
+    experimentation_level: "Limited" | "Moderate" | "Aggressive";
   };
 
   activity_timeline: {
-    first_seen: string | null;
-    last_seen: string | null;
-    ad_lifespan_days: number | null;
-    always_on: "Yes" | "No";
+    first_observed: string | null;
+    most_recent_activity: string | null;
+    ad_longevity_days: number | null;
+    always_on_presence: "Yes" | "No";
   };
 
-  format_mix: Array<{
-    format: CanonicalAdFormat;
-    surface: AdSurface;
+  ad_format_mix: Array<{
+    format: "Search Ads" | "Display Ads" | "Video Ads" | "Other Ads";
     count: number;
     share: number;
   }>;
 
-  inferred_spend: {
-    level: SpendLevel;
-    confidence: "Low" | "Medium" | "High";
+  campaign_stability_signals: {
+    average_ad_lifespan_days: number | null;
+    creative_rotation: "Low" | "Moderate" | "High";
+    burst_activity_detected: "Yes" | "No";
+    volatility_index: "Low" | "Medium" | "High";
   };
 
-  sales_guidance: {
-    posture: "Experimental" | "Scaling" | "Aggressive";
-    opportunity_signal: string;
+  advertiser_scale: {
+    scale_classification: "Local" | "Regional" | "National";
+    geographic_focus: "Single-market" | "Multi-market" | "Nationwide";
+    buying_complexity: "Simple" | "Moderate" | "Advanced";
+  };
+
+  estimated_monthly_media_spend: {
+    spend_tier:
+      | "$500 – $10,000 / month"
+      | "$10,001 – $20,000 / month"
+      | "$20,001 – $100,000 / month"
+      | "$100,000+ / month";
+  };
+
+  spend_adequacy: {
+    relative_investment_level:
+      | "Underinvested"
+      | "Appropriately Invested"
+      | "Overextended";
+    consistency_vs_scale: "Low" | "Moderate" | "High";
+    growth_headroom: "Limited" | "Moderate" | "Significant";
+  };
+
+  spend_posture: {
+    commitment_level: "Experimental" | "Sustained" | "Aggressive";
+    scaling_pattern: "Flat" | "Seasonal" | "Accelerating";
+    risk_profile: "Conservative" | "Balanced" | "Aggressive";
+  };
+
+  sales_interpretation: {
+    sell_with_opportunity: string;
+    sell_against_opportunity: string;
+    outreach_recommendation: string;
   };
 
   data_scope: {
@@ -63,13 +92,6 @@ export type SellerSummary = {
   };
 };
 
-export type FormatSpecificSummary = {
-  format: CanonicalAdFormat;
-  surface: AdSurface;
-  count: number;
-  share: number;
-};
-
 /* ============================================================================
    Helpers
 ============================================================================ */
@@ -77,25 +99,142 @@ export type FormatSpecificSummary = {
 const percent = (count: number, total: number) =>
   total > 0 ? Number(((count / total) * 100).toFixed(1)) : 0;
 
-const confidenceFromVolume = (totalAds: number): "Low" | "Medium" | "High" =>
+const confidenceFromVolume = (totalAds: number): ConfidenceLevel =>
   totalAds < 5 ? "Low" : totalAds < 15 ? "Medium" : "High";
 
-const spendLevelFromSignal = (
+const salesSignalFromVolume = (totalAds: number): SalesSignalStrength =>
+  totalAds < 5 ? "Weak" : totalAds < 20 ? "Moderate" : "Strong";
+
+const tierFromSignal = (
   totalAds: number,
-  multiVideo: boolean,
-  hasCTV: boolean
-): SpendLevel => {
-  if (hasCTV && multiVideo) return "$$$$";
-  if (multiVideo) return "$$$";
-  if (totalAds >= 10) return "$$";
-  return "$";
+  hasVideo: boolean
+): AdsSummary["estimated_monthly_media_spend"]["spend_tier"] => {
+  if (totalAds >= 25 || hasVideo) return "$20,001 – $100,000 / month";
+  if (totalAds >= 10) return "$10,001 – $20,000 / month";
+  return "$500 – $10,000 / month";
+};
+
+const intensityFromVolume = (totalAds: number): IntensityLevel =>
+  totalAds < 5 ? "Low" : totalAds < 20 ? "Moderate" : "High";
+
+const sophisticationFromFormats = (formats: number): IntensityLevel =>
+  formats <= 1 ? "Low" : formats <= 2 ? "Moderate" : "High";
+
+const campaignContinuityFromLifespan = (
+  lifespanDays: number | null
+): "Short-term" | "Long-running" =>
+  lifespanDays !== null && lifespanDays >= 90 ? "Long-running" : "Short-term";
+
+const experimentationFromMix = (
+  formats: number,
+  hasVideo: boolean
+): "Limited" | "Moderate" | "Aggressive" => {
+  if (formats >= 3 && hasVideo) return "Aggressive";
+  if (formats >= 2) return "Moderate";
+  return "Limited";
+};
+
+const orientationFromMix = (
+  searchShare: number,
+  videoShare: number
+): "Performance-driven" | "Brand-led" | "Mixed" => {
+  if (searchShare >= 60) return "Performance-driven";
+  if (videoShare >= 40) return "Brand-led";
+  return "Mixed";
+};
+
+const scaleFromVolume = (
+  totalAds: number
+): AdsSummary["advertiser_scale"] => {
+  if (totalAds >= 30) {
+    return {
+      scale_classification: "National",
+      geographic_focus: "Nationwide",
+      buying_complexity: "Advanced",
+    };
+  }
+  if (totalAds >= 10) {
+    return {
+      scale_classification: "Regional",
+      geographic_focus: "Multi-market",
+      buying_complexity: "Moderate",
+    };
+  }
+  return {
+    scale_classification: "Local",
+    geographic_focus: "Single-market",
+    buying_complexity: "Simple",
+  };
+};
+
+const adequacyFromSpend = (
+  spendTier: AdsSummary["estimated_monthly_media_spend"]["spend_tier"],
+  intensity: IntensityLevel
+): AdsSummary["spend_adequacy"] => {
+  const alignment =
+    spendTier === "$500 – $10,000 / month" && intensity === "High"
+      ? "Underinvested"
+      : spendTier === "$100,000+ / month" && intensity === "Low"
+      ? "Overextended"
+      : "Appropriately Invested";
+
+  return {
+    relative_investment_level: alignment,
+    consistency_vs_scale:
+      intensity === "High" ? "High" : intensity === "Moderate" ? "Moderate" : "Low",
+    growth_headroom:
+      alignment === "Underinvested"
+        ? "Significant"
+        : alignment === "Overextended"
+        ? "Limited"
+        : "Moderate",
+  };
+};
+
+const postureFromSpend = (
+  spendTier: AdsSummary["estimated_monthly_media_spend"]["spend_tier"],
+  hasVideo: boolean
+): AdsSummary["spend_posture"] => {
+  if (spendTier === "$100,000+ / month") {
+    return {
+      commitment_level: "Aggressive",
+      scaling_pattern: "Accelerating",
+      risk_profile: "Aggressive",
+    };
+  }
+  if (spendTier === "$20,001 – $100,000 / month" || hasVideo) {
+    return {
+      commitment_level: "Sustained",
+      scaling_pattern: "Seasonal",
+      risk_profile: "Balanced",
+    };
+  }
+  return {
+    commitment_level: "Experimental",
+    scaling_pattern: "Flat",
+    risk_profile: "Conservative",
+  };
+};
+
+const averageAdLifespanDays = (ads: AdsAnalysis["ads"]): number | null => {
+  if (ads.length === 0) return null;
+  const lifespans = ads.map(ad => {
+    const start = parseISO(ad.first_seen);
+    const end = parseISO(ad.last_seen);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return 0;
+    }
+    return Math.max(0, differenceInDays(end, start));
+  });
+  const total = lifespans.reduce((sum, value) => sum + value, 0);
+  return Math.round(total / lifespans.length);
 };
 
 /* ============================================================================
    Builder
 ============================================================================ */
 
-export function buildSellerSummary(analysis: AdsAnalysis): SellerSummary {
+export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
   const totalAds = analysis.totals.ads;
 
   const status =
@@ -107,84 +246,125 @@ export function buildSellerSummary(analysis: AdsAnalysis): SellerSummary {
       : "Active";
 
   const bySurface = analysis.by_surface;
-  const byFormatSurface = analysis.by_format_surface;
+  const byFormat = analysis.by_format;
 
-  const hasSearch = bySurface["Search Network"] > 0;
-  const hasDisplay = bySurface["Programmatic Display"] > 0;
-  const hasProgVideo = bySurface["Programmatic Video"] > 0;
-  const hasYouTube = bySurface["YouTube"] > 0;
-  const hasCTV = bySurface["Connected TV"] > 0;
+  const searchAds = byFormat.Search;
+  const displayAds = byFormat.Display;
+  const videoAds = byFormat.Video + byFormat.CTV;
+  const otherAds = byFormat.Other;
 
-  const multiVideoSignal =
-    [hasProgVideo, hasYouTube, hasCTV].filter(Boolean).length >= 2;
+  const formatMix = [
+    { format: "Search Ads", count: searchAds },
+    { format: "Display Ads", count: displayAds },
+    { format: "Video Ads", count: videoAds },
+    { format: "Other Ads", count: otherAds },
+  ].map(item => ({
+    ...item,
+    share: percent(item.count, totalAds),
+  }));
 
-  const formatMix = Object.entries(byFormatSurface).map(([key, count]) => {
-    const [format, surface] = key.split("::");
-    return {
-      format: format as CanonicalAdFormat,
-      surface: surface as AdSurface,
-      count,
-      share: percent(count, totalAds),
-    };
-  });
-
-  const spendLevel = spendLevelFromSignal(
-    totalAds,
-    multiVideoSignal,
-    hasCTV
-  );
+  const formatCount = [
+    searchAds,
+    displayAds,
+    videoAds,
+    otherAds,
+  ].filter(count => count > 0).length;
+  const hasVideo = videoAds > 0;
+  const intensity = intensityFromVolume(totalAds);
+  const sophistication = sophisticationFromFormats(formatCount);
+  const experimentLevel = experimentationFromMix(formatCount, hasVideo);
+  const searchShare = percent(searchAds, totalAds);
+  const videoShare = percent(videoAds, totalAds);
+  const strategyOrientation = orientationFromMix(searchShare, videoShare);
+  const spendTier = tierFromSignal(totalAds, hasVideo);
+  const scale = scaleFromVolume(totalAds);
+  const adequacy = adequacyFromSpend(spendTier, intensity);
+  const posture = postureFromSpend(spendTier, hasVideo);
+  const averageLifespan = averageAdLifespanDays(analysis.ads);
+  const alwaysOnPresence =
+    status === "Active" &&
+    analysis.timeline.ad_lifespan_days !== null &&
+    analysis.timeline.ad_lifespan_days >= 180
+      ? "Yes"
+      : "No";
 
   return {
     domain: analysis.domain,
 
-    activity_snapshot: {
+    advertising_activity_snapshot: {
       status,
-      confidence: confidenceFromVolume(totalAds),
-      total_ads_detected: totalAds,
+      confidence_level: confidenceFromVolume(totalAds),
       analysis_window_days: ANALYSIS_WINDOW.days,
       region: ANALYSIS_WINDOW.region,
+      sales_signal_strength: salesSignalFromVolume(totalAds),
+      total_ads_detected: totalAds,
     },
 
-    channel_signal_profile: {
-      has_search: hasSearch,
-      has_display: hasDisplay,
-      has_programmatic_video: hasProgVideo,
-      has_youtube: hasYouTube,
-      has_ctv: hasCTV,
-      multi_video_signal: multiVideoSignal,
+    advertising_behavior_profile: {
+      advertising_intensity: intensity,
+      strategy_orientation: strategyOrientation,
+      campaign_continuity: campaignContinuityFromLifespan(
+        analysis.timeline.ad_lifespan_days
+      ),
+      format_sophistication: sophistication,
+      experimentation_level: experimentLevel,
     },
 
     activity_timeline: {
-      first_seen: analysis.timeline.first_seen,
-      last_seen: analysis.timeline.last_seen,
-      ad_lifespan_days: analysis.timeline.ad_lifespan_days,
-      always_on:
-        status === "Active" &&
+      first_observed: analysis.timeline.first_seen,
+      most_recent_activity: analysis.timeline.last_seen,
+      ad_longevity_days: analysis.timeline.ad_lifespan_days,
+      always_on_presence: alwaysOnPresence,
+    },
+
+    ad_format_mix: formatMix,
+
+    campaign_stability_signals: {
+      average_ad_lifespan_days: averageLifespan,
+      creative_rotation:
+        averageLifespan !== null && averageLifespan <= 14
+          ? "High"
+          : averageLifespan !== null && averageLifespan <= 45
+          ? "Moderate"
+          : "Low",
+      burst_activity_detected:
+        analysis.timeline.last_seen_days_ago !== null &&
+        analysis.timeline.last_seen_days_ago <= 7 &&
         analysis.timeline.ad_lifespan_days !== null &&
-        analysis.timeline.ad_lifespan_days >= 180
+        analysis.timeline.ad_lifespan_days <= 21
           ? "Yes"
           : "No",
+      volatility_index:
+        intensity === "High"
+          ? "High"
+          : intensity === "Moderate"
+          ? "Medium"
+          : "Low",
     },
 
-    format_mix: formatMix,
+    advertiser_scale: scale,
 
-    inferred_spend: {
-      level: spendLevel,
-      confidence: confidenceFromVolume(totalAds),
+    estimated_monthly_media_spend: {
+      spend_tier: spendTier,
     },
 
-    sales_guidance: {
-      posture:
-        spendLevel === "$$$$"
-          ? "Aggressive"
-          : spendLevel === "$$$"
-          ? "Scaling"
-          : "Experimental",
-      opportunity_signal: multiVideoSignal
-        ? "Multi-surface video advertiser with escalation potential"
-        : hasSearch && !hasVideoSignals(bySurface)
-        ? "Search-led advertiser, early funnel expansion opportunity"
-        : "Selective advertiser with room to broaden channel mix",
+    spend_adequacy: adequacy,
+
+    spend_posture: posture,
+
+    sales_interpretation: {
+      sell_with_opportunity:
+        status === "Active"
+          ? "Position recent activity as a signal to test incremental inventory."
+          : "Re-engage with a lightweight package aligned to historical signals.",
+      sell_against_opportunity:
+        intensity === "High"
+          ? "Emphasize competitive protection and share-of-voice defense."
+          : "Highlight low-friction entry points to expand coverage.",
+      outreach_recommendation:
+        experimentLevel === "Aggressive"
+          ? "Lead with multi-format bundles and advanced measurement."
+          : "Start with a focused plan and scale once performance stabilizes.",
     },
 
     data_scope: {
@@ -193,43 +373,4 @@ export function buildSellerSummary(analysis: AdsAnalysis): SellerSummary {
       source: ANALYSIS_WINDOW.source,
     },
   };
-}
-
-export function buildDomainSummaryText(summary: SellerSummary): string {
-  const status = summary.activity_snapshot.status;
-  const confidence = summary.activity_snapshot.confidence;
-  const totalAds = summary.activity_snapshot.total_ads_detected;
-  const spendLevel = summary.inferred_spend.level;
-  const posture = summary.sales_guidance.posture;
-  const signals = summary.channel_signal_profile;
-
-  const channels = [
-    signals.has_search ? "search" : null,
-    signals.has_display ? "display" : null,
-    signals.has_programmatic_video ? "programmatic video" : null,
-    signals.has_youtube ? "YouTube" : null,
-    signals.has_ctv ? "CTV" : null,
-  ].filter(Boolean);
-
-  const channelText =
-    channels.length > 0 ? channels.join(", ") : "no channels";
-
-  return [
-    `${summary.domain} is ${status} with ${confidence.toLowerCase()} confidence.`,
-    `Detected ${totalAds} ads across ${channelText}.`,
-    `Spend signal: ${spendLevel}. Sales posture: ${posture}.`,
-    summary.sales_guidance.opportunity_signal,
-  ].join(" ");
-}
-
-/* ============================================================================
-   Internal Guards
-============================================================================ */
-
-function hasVideoSignals(bySurface: AdsAnalysis["by_surface"]): boolean {
-  return (
-    bySurface["Programmatic Video"] > 0 ||
-    bySurface["YouTube"] > 0 ||
-    bySurface["Connected TV"] > 0
-  );
 }
