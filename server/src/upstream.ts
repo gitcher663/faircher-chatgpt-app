@@ -75,6 +75,9 @@ type FetchArgs = {
 
 const SEARCH_API_URL = "https://www.searchapi.io/api/v1/search";
 const DEFAULT_PAGE_LIMIT = 10;
+const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 500;
 
 /* ------------------------------------------------------------------
    Helpers
@@ -82,6 +85,52 @@ const DEFAULT_PAGE_LIMIT = 10;
 
 function normalizeStatus(status?: string): string {
   return (status ?? "").trim().toLowerCase();
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    retries = DEFAULT_RETRIES,
+    retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  }: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {}
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      if (!response.ok && shouldRetryStatus(response.status)) {
+        lastError = new Error(`Retryable status ${response.status}`);
+      } else {
+        return response;
+      }
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error("Unknown fetch error");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (attempt < retries) {
+      await new Promise(resolve =>
+        setTimeout(resolve, retryDelayMs * (attempt + 1))
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Upstream request failed");
 }
 
 /* ------------------------------------------------------------------
@@ -106,11 +155,14 @@ export async function fetchUpstreamAds(
     region: "US",
   });
 
-  const response = await fetch(`${SEARCH_API_URL}?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
+  const response = await fetchWithRetry(
+    `${SEARCH_API_URL}?${params.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }
+  );
 
   if (!response.ok) {
     const text = await response.text();
@@ -168,11 +220,14 @@ export async function fetchAllPages(
       searchParams.set("page_token", nextPageToken);
     }
 
-    const response = await fetch(`${baseUrl}?${searchParams.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
+    const response = await fetchWithRetry(
+      `${baseUrl}?${searchParams.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    );
 
     if (!response.ok) {
       const text = await response.text();

@@ -1,4 +1,5 @@
 import { normalizeDomain } from "./normalize";
+import { ValidationError } from "./errors";
 import { fetchAllPages } from "./upstream";
 import { analyzeAds } from "./ads_analysis";
 import { normalizeAds } from "./normalize_ads";
@@ -23,7 +24,7 @@ export type ToolRuntime = {
 
 export type ToolRegistry = Record<string, ToolRuntime>;
 
-type ToolErrorCode = "INVALID_INPUT" | "UPSTREAM_ERROR" | "UNKNOWN_ERROR";
+type ToolErrorCode = "invalid_domain" | "upstream_error";
 
 export type ToolError = {
   error: {
@@ -42,6 +43,9 @@ export type ToolOutput = ReturnType<typeof buildSellerSummary> | ToolError;
 const DEFAULT_LOOKBACK_DAYS = 365;
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
 const BUILTWITH_API_BASE = "https://api.builtwith.com/v21/api.json";
+const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 500;
 
 /* ============================================================================
    Time helpers (SearchAPI only)
@@ -56,6 +60,52 @@ function computeTimePeriod(lookbackDays: number): string {
   const toStr = to.toISOString().slice(0, 10);
 
   return `${fromStr}..${toStr}`;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    retries = DEFAULT_RETRIES,
+    retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  }: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {}
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      if (!response.ok && shouldRetryStatus(response.status)) {
+        lastError = new Error(`Retryable status ${response.status}`);
+      } else {
+        return response;
+      }
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error("Unknown fetch error");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (attempt < retries) {
+      await new Promise(resolve =>
+        setTimeout(resolve, retryDelayMs * (attempt + 1))
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Upstream request failed");
 }
 
 /* ============================================================================
@@ -113,15 +163,19 @@ async function fetchLinkedInAds(advertiser: string) {
 }
 
 async function fetchBuiltWith(domain: string) {
+  const apiKey = process.env.BUILTWITH_KEY;
+  if (!apiKey) {
+    throw new Error("Missing BUILTWITH_KEY");
+  }
   const url =
     `${BUILTWITH_API_BASE}` +
-    `?KEY=${process.env.BUILTWITH_KEY}` +
+    `?KEY=${apiKey}` +
     `&LOOKUP=${domain}` +
     `&NOPII=yes` +
     `&NOMETA=yes` +
     `&NOATTR=yes`;
 
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url, {});
   if (!res.ok) {
     throw new Error(`BuiltWith error: ${res.status}`);
   }
@@ -168,7 +222,11 @@ export function registerFairCherTool(): ToolRegistry {
             typeof args.domain !== "string" ||
             args.domain.trim().length === 0
           ) {
-            return buildToolError("INVALID_INPUT", "domain is required");
+            return buildToolError(
+              "invalid_domain",
+              "Domain must be a valid apex domain.",
+              { domain: args?.domain }
+            );
           }
 
           const lookbackDays = DEFAULT_LOOKBACK_DAYS;
@@ -242,18 +300,19 @@ export function registerFairCherTool(): ToolRegistry {
              -------------------------------------------------------------- */
 
           // Output contract (success):
-          // - Returns SellerSummary JSON with required keys:
+          // - Returns AdsSummary JSON with required keys:
           //   - domain: string
-          //   - activity_snapshot: { status, confidence, total_ads_detected,
-          //     analysis_window_days, region }
-          //   - channel_signal_profile: { has_search, has_display,
-          //     has_programmatic_video, has_youtube, has_ctv, multi_video_signal }
-          //   - activity_timeline: { first_seen, last_seen, ad_lifespan_days,
-          //     always_on }
-          //   - format_mix: [{ format, surface, count, share }]
-          //   - inferred_spend: { level, confidence }
-          //   - sales_guidance: { posture, opportunity_signal }
-          //   - data_scope: { geography, lookback_window_days, source }
+          //   - advertising_activity_snapshot
+          //   - advertising_behavior_profile
+          //   - activity_timeline
+          //   - ad_format_mix
+          //   - campaign_stability_signals
+          //   - advertiser_scale
+          //   - estimated_monthly_media_spend
+          //   - spend_adequacy
+          //   - spend_posture
+          //   - sales_interpretation
+          //   - data_scope
           //
           // Output contract (error):
           // - { error: { code, message, details? } }
@@ -264,25 +323,26 @@ export function registerFairCherTool(): ToolRegistry {
           // rather than wrapping it in { structured, summary, meta }.
           return sellerSummary;
         } catch (error) {
+          if (error instanceof ValidationError) {
+            return buildToolError(
+              "invalid_domain",
+              "Domain must be a valid apex domain.",
+              { domain: args?.domain }
+            );
+          }
           return buildToolError(
-            "UPSTREAM_ERROR",
-            "Failed to fetch or analyze advertising data.",
+            "upstream_error",
+            "Upstream ads service unavailable.",
             {
               cause:
                 error instanceof Error ? error.message : "Unknown error",
+              retryable: true,
             }
           );
         }
       },
     },
   };
-}
-
-function countAds(pages: Array<{ ad_creatives?: Array<unknown> }>): number {
-  return pages.reduce(
-    (total, page) => total + (page.ad_creatives?.length ?? 0),
-    0
-  );
 }
 
 function buildToolError(

@@ -12,7 +12,18 @@ This repository contains two primary packages:
 3. The server responds with structured JSON (no HTML).
 4. The UI is built separately and served as static assets via `server/ui/dist`.
 
+## Configuration & runtime dependencies
+
+Environment variables (required for production):
+
+- `UPSTREAM_API_KEY`: SearchAPI key used to fetch ads data.
+- `BUILTWITH_KEY`: BuiltWith API key for infrastructure signals.
+- `PORT`: Optional server port (defaults to 3000).
+
+Runtime dependencies:
+
+- Node.js 20+ (for native `fetch` and `AbortController`).
+
 ## TODO
 
-- Document runtime dependencies for the MCP server.
 - Add a sequence diagram once the upstream client is finalized.
