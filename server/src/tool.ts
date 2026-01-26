@@ -199,20 +199,20 @@ export function registerFairCherTool(): ToolRegistry {
         },
       },
 
-      async run(args: { domain: string }): Promise<any> {
+      async run(args: { domain: string }) {
         try {
           if (
             !args ||
             typeof args.domain !== "string" ||
             args.domain.trim().length === 0
           ) {
-            return {
-              content: buildToolError(
+            return wrapContent(
+              buildToolError(
                 "invalid_domain",
                 "Domain must be a valid apex domain.",
                 { domain: args?.domain }
-              ),
-            };
+              )
+            );
           }
 
           const lookbackDays = DEFAULT_LOOKBACK_DAYS;
@@ -236,12 +236,8 @@ export function registerFairCherTool(): ToolRegistry {
           if (includeBuiltWith) {
             try {
               await fetchBuiltWith(domain);
-            } catch (error) {
-              console.warn("BuiltWith enrichment failed; continuing without it", {
-                domain,
-                cause:
-                  error instanceof Error ? error.message : "Unknown error",
-              });
+            } catch {
+              // BuiltWith is optional; ignore failures
             }
           }
 
@@ -252,29 +248,23 @@ export function registerFairCherTool(): ToolRegistry {
             ...videoAdsRaw.flatMap(upstream => normalizeAds({ upstream })),
           ];
 
-          const analysis = analyzeAds({
-            domain,
-            ads,
-          });
-
+          const analysis = analyzeAds({ domain, ads });
           const sellerSummary = buildSellerSummary(analysis);
 
-          return {
-            content: sellerSummary,
-          };
+          return wrapContent(sellerSummary);
         } catch (error) {
           if (error instanceof ValidationError) {
-            return {
-              content: buildToolError(
+            return wrapContent(
+              buildToolError(
                 "invalid_domain",
                 "Domain must be a valid apex domain.",
                 { domain: args?.domain }
-              ),
-            };
+              )
+            );
           }
 
-          return {
-            content: buildToolError(
+          return wrapContent(
+            buildToolError(
               "upstream_error",
               "Upstream ads service unavailable.",
               {
@@ -282,11 +272,26 @@ export function registerFairCherTool(): ToolRegistry {
                   error instanceof Error ? error.message : "Unknown error",
                 retryable: true,
               }
-            ),
-          };
+            )
+          );
         }
       },
     },
+  };
+}
+
+/* ============================================================================
+   Helpers
+   ============================================================================ */
+
+function wrapContent(payload: unknown) {
+  return {
+    content: [
+      {
+        type: "json",
+        json: payload,
+      },
+    ],
   };
 }
 
