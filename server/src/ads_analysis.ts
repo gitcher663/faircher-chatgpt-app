@@ -77,6 +77,13 @@ export type AdsAnalysis = {
     ad_lifespan_days: number | null;
     last_seen_days_ago: number | null;
   };
+
+  /**
+   * Optional infrastructure enrichment (e.g. BuiltWith).
+   * Passed explicitly from tools.ts.
+   * This layer does not fetch or interpret it.
+   */
+  infrastructure?: unknown | null;
 };
 
 /* ------------------------------------------------------------------
@@ -112,9 +119,14 @@ function isWithinWindow(lastSeen: string): boolean {
 type AnalyzeAdsArgs = {
   domain: string;
   ads: NormalizedAdSignal[];
+  infrastructure?: unknown | null;
 };
 
-export function analyzeAds({ domain, ads }: AnalyzeAdsArgs): AdsAnalysis {
+export function analyzeAds({
+  domain,
+  ads,
+  infrastructure,
+}: AnalyzeAdsArgs): AdsAnalysis {
   const windowedAds = ads
     .filter(ad => isValidISODate(ad.first_seen))
     .filter(ad => isValidISODate(ad.last_seen))
@@ -186,5 +198,7 @@ export function analyzeAds({ domain, ads }: AnalyzeAdsArgs): AdsAnalysis {
       last_seen_days_ago:
         lastSeen ? differenceInDays(new Date(), lastSeen) : null,
     },
+
+    infrastructure,
   };
 }
