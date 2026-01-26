@@ -221,6 +221,10 @@ export function registerFairCherTool(): ToolRegistry {
           const domain = normalizeDomain(args.domain);
           const timePeriod = computeTimePeriod(lookbackDays);
 
+          /* --------------------------------------------------------------
+             Fetch advertising data
+             -------------------------------------------------------------- */
+
           const [
             displayAds,
             searchAds,
@@ -233,13 +237,31 @@ export function registerFairCherTool(): ToolRegistry {
             fetchNonYouTubeVideoAds(domain, timePeriod),
           ]);
 
+          /* --------------------------------------------------------------
+             BuiltWith enrichment (EXACTLY ONCE)
+             -------------------------------------------------------------- */
+
+          let infrastructure: unknown | null = null;
+
           if (includeBuiltWith) {
             try {
-              await fetchBuiltWith(domain);
-            } catch {
-              // BuiltWith is optional; ignore failures
+              infrastructure = await fetchBuiltWith(domain);
+            } catch (error) {
+              console.warn(
+                "BuiltWith enrichment failed; continuing without it",
+                {
+                  domain,
+                  cause:
+                    error instanceof Error ? error.message : "Unknown error",
+                }
+              );
+              infrastructure = null;
             }
           }
+
+          /* --------------------------------------------------------------
+             Normalize & analyze
+             -------------------------------------------------------------- */
 
           const ads = [
             ...displayAds.flatMap(upstream => normalizeAds({ upstream })),
@@ -248,7 +270,12 @@ export function registerFairCherTool(): ToolRegistry {
             ...videoAdsRaw.flatMap(upstream => normalizeAds({ upstream })),
           ];
 
-          const analysis = analyzeAds({ domain, ads });
+          const analysis = analyzeAds({
+            domain,
+            ads,
+            infrastructure,
+          });
+
           const sellerSummary = buildSellerSummary(analysis);
 
           return wrapContent(sellerSummary);
