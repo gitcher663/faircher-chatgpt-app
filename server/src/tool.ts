@@ -23,6 +23,18 @@ export type ToolRuntime = {
 
 export type ToolRegistry = Record<string, ToolRuntime>;
 
+type ToolErrorCode = "INVALID_INPUT" | "UPSTREAM_ERROR" | "UNKNOWN_ERROR";
+
+export type ToolError = {
+  error: {
+    code: ToolErrorCode;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+};
+
+export type ToolOutput = ReturnType<typeof buildSellerSummary> | ToolError;
+
 /* ============================================================================
    Constants
    ============================================================================ */
@@ -149,85 +161,118 @@ export function registerFairCherTool(): ToolRegistry {
          Runtime
          ====================================================================== */
 
-      async run(args: { domain: string }) {
-        const lookbackDays = DEFAULT_LOOKBACK_DAYS;
-        const includeBuiltWith = true;
+      async run(args: { domain: string }): Promise<ToolOutput> {
+        try {
+          if (
+            !args ||
+            typeof args.domain !== "string" ||
+            args.domain.trim().length === 0
+          ) {
+            return buildToolError("INVALID_INPUT", "domain is required");
+          }
 
-        // Normalize only what SHOULD be normalized
-        const domain = normalizeDomain(args.domain);
+          const lookbackDays = DEFAULT_LOOKBACK_DAYS;
+          const includeBuiltWith = true;
 
-        // LinkedIn advertiser handling (explicit)
-        const advertiser = domain;
+          // Normalize only what SHOULD be normalized
+          const domain = normalizeDomain(args.domain);
 
-        const timePeriod = computeTimePeriod(lookbackDays);
+          // LinkedIn advertiser handling (explicit)
+          const advertiser = domain;
 
-        /* --------------------------------------------------------------
-           Fetch creative-level advertising data
-           -------------------------------------------------------------- */
+          const timePeriod = computeTimePeriod(lookbackDays);
 
-        const [
-          displayAds,
-          searchAds,
-          youtubeAds,
-          videoAdsRaw,
-          linkedInAds,
-        ] = await Promise.all([
-          fetchDisplayAds(domain, timePeriod),
-          fetchSearchAds(domain, timePeriod),
-          fetchYouTubeAds(domain, timePeriod),
-          fetchNonYouTubeVideoAds(domain, timePeriod),
-          fetchLinkedInAds(advertiser),
-        ]);
+          /* --------------------------------------------------------------
+             Fetch creative-level advertising data
+             -------------------------------------------------------------- */
 
-        /* --------------------------------------------------------------
-           Advertising infrastructure intelligence (BuiltWith)
-           -------------------------------------------------------------- */
+          const [
+            displayAds,
+            searchAds,
+            youtubeAds,
+            videoAdsRaw,
+            linkedInAds,
+          ] = await Promise.all([
+            fetchDisplayAds(domain, timePeriod),
+            fetchSearchAds(domain, timePeriod),
+            fetchYouTubeAds(domain, timePeriod),
+            fetchNonYouTubeVideoAds(domain, timePeriod),
+            fetchLinkedInAds(advertiser),
+          ]);
 
-        const builtWith = includeBuiltWith
-          ? await fetchBuiltWith(domain)
-          : null;
+          /* --------------------------------------------------------------
+             Advertising infrastructure intelligence (BuiltWith)
+             -------------------------------------------------------------- */
 
-        /* --------------------------------------------------------------
-           Analysis (facts only)
-           -------------------------------------------------------------- */
+          const builtWith = includeBuiltWith
+            ? await fetchBuiltWith(domain)
+            : null;
 
-        const ads = [
-          ...displayAds.flatMap(upstream =>
-            normalizeAds({ upstream })
-          ),
-          ...searchAds.flatMap(upstream =>
-            normalizeAds({ upstream })
-          ),
-          ...youtubeAds.flatMap(upstream =>
-            normalizeAds({ upstream })
-          ),
-          ...videoAdsRaw.flatMap(upstream =>
-            normalizeAds({ upstream })
-          ),
-          ...linkedInAds.flatMap(upstream =>
-            normalizeAds({ upstream })
-          ),
-        ];
+          void builtWith;
 
-        const analysis = analyzeAds({
-          domain,
-          ads,
-        });
+          /* --------------------------------------------------------------
+             Analysis (facts only)
+             -------------------------------------------------------------- */
 
-        /* --------------------------------------------------------------
-           Interpretation & presentation
-           -------------------------------------------------------------- */
+          const ads = [
+            ...displayAds.flatMap(upstream =>
+              normalizeAds({ upstream })
+            ),
+            ...searchAds.flatMap(upstream =>
+              normalizeAds({ upstream })
+            ),
+            ...youtubeAds.flatMap(upstream =>
+              normalizeAds({ upstream })
+            ),
+            ...videoAdsRaw.flatMap(upstream =>
+              normalizeAds({ upstream })
+            ),
+            ...linkedInAds.flatMap(upstream =>
+              normalizeAds({ upstream })
+            ),
+          ];
 
-        const sellerSummary = buildSellerSummary(analysis);
+          const analysis = analyzeAds({
+            domain,
+            ads,
+          });
 
-        /* --------------------------------------------------------------
-           Final tool output
-           -------------------------------------------------------------- */
+          /* --------------------------------------------------------------
+             Tool output (structured data only)
+             -------------------------------------------------------------- */
 
-        // The UI consumes window.openai.toolOutput as AdsSummaryOutput, so the
-        // MCP tools/call response must return the structured summary directly
-        // rather than wrapping it in { structured, summary, meta }.
-        return sellerSummary;
+          // Output contract (success):
+          // - Returns SellerSummary JSON with required keys:
+          //   - domain: string
+          //   - activity_snapshot: { status, confidence, total_ads_detected,
+          //     analysis_window_days, region }
+          //   - channel_signal_profile: { has_search, has_display,
+          //     has_programmatic_video, has_youtube, has_ctv, multi_video_signal }
+          //   - activity_timeline: { first_seen, last_seen, ad_lifespan_days,
+          //     always_on }
+          //   - format_mix: [{ format, surface, count, share }]
+          //   - inferred_spend: { level, confidence }
+          //   - sales_guidance: { posture, opportunity_signal }
+          //   - data_scope: { geography, lookback_window_days, source }
+          //
+          // Output contract (error):
+          // - { error: { code, message, details? } }
+          const sellerSummary = buildSellerSummary(analysis);
+
+          // The UI consumes window.openai.toolOutput as AdsSummaryOutput, so the
+          // MCP tools/call response must return the structured summary directly
+          // rather than wrapping it in { structured, summary, meta }.
+          return sellerSummary;
+        } catch (error) {
+          return buildToolError(
+            "UPSTREAM_ERROR",
+            "Failed to fetch or analyze advertising data.",
+            {
+              cause:
+                error instanceof Error ? error.message : "Unknown error",
+            }
+          );
+        }
       },
     },
   };
@@ -238,4 +283,18 @@ function countAds(pages: Array<{ ad_creatives?: Array<unknown> }>): number {
     (total, page) => total + (page.ad_creatives?.length ?? 0),
     0
   );
+}
+
+function buildToolError(
+  code: ToolErrorCode,
+  message: string,
+  details?: Record<string, unknown>
+): ToolError {
+  return {
+    error: {
+      code,
+      message,
+      ...(details ? { details } : {}),
+    },
+  };
 }
