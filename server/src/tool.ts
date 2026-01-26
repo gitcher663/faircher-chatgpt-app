@@ -2,10 +2,7 @@ import { normalizeDomain } from "./normalize";
 import { fetchAllPages } from "./upstream";
 import { analyzeAds } from "./ads_analysis";
 import { normalizeAds } from "./normalize.ads";
-import {
-  buildSellerSummary,
-  buildDomainSummaryText,
-} from "./summary_builder";
+import { buildSellerSummary } from "./summary_builder";
 
 /* ============================================================================
    Tool Types
@@ -125,9 +122,15 @@ async function fetchBuiltWith(domain: string) {
 
 export function registerFairCherTool(): ToolRegistry {
   return {
-    faircher_advertising_intelligence: {
+    // MCP discovery lifecycle: the host calls tools/list, then uses the tool
+    // name returned there when issuing tools/call. If the tool name in this
+    // registry does not match what ChatGPT expects, the model reports "no tools
+    // available" because MCP discovery never surfaces a compatible tool.
+    faircher_domain_ads_summary: {
       definition: {
-        name: "faircher_advertising_intelligence",
+        // Tool name must match docs/tool-spec.md exactly so tools/list exposes
+        // the contract ChatGPT is instructed to call.
+        name: "faircher_domain_ads_summary",
         description:
           "Returns consolidated advertising intelligence for a domain, including search, display, video, CTV, paid social, and advertising infrastructure signals.",
         inputSchema: {
@@ -138,22 +141,6 @@ export function registerFairCherTool(): ToolRegistry {
               type: "string",
               description: "Apex domain (e.g. example.com)",
             },
-            advertiser: {
-              type: "string",
-              description:
-                "Optional advertiser name (used for LinkedIn Ad Library). If omitted, domain will be used as a best-effort fallback.",
-            },
-            lookback_days: {
-              type: "number",
-              description: "Number of days to look back (default: 365)",
-              default: DEFAULT_LOOKBACK_DAYS,
-            },
-            include_builtwith: {
-              type: "boolean",
-              description:
-                "Include advertising infrastructure detection (BuiltWith)",
-              default: true,
-            },
           },
         },
       },
@@ -162,20 +149,15 @@ export function registerFairCherTool(): ToolRegistry {
          Runtime
          ====================================================================== */
 
-      async run(args: {
-        domain: string;
-        advertiser?: string;
-        lookback_days?: number;
-        include_builtwith?: boolean;
-      }) {
-        const lookbackDays = args.lookback_days ?? DEFAULT_LOOKBACK_DAYS;
-        const includeBuiltWith = args.include_builtwith !== false;
+      async run(args: { domain: string }) {
+        const lookbackDays = DEFAULT_LOOKBACK_DAYS;
+        const includeBuiltWith = true;
 
         // Normalize only what SHOULD be normalized
         const domain = normalizeDomain(args.domain);
 
         // LinkedIn advertiser handling (explicit)
-        const advertiser = args.advertiser ?? domain;
+        const advertiser = domain;
 
         const timePeriod = computeTimePeriod(lookbackDays);
 
@@ -237,28 +219,15 @@ export function registerFairCherTool(): ToolRegistry {
            -------------------------------------------------------------- */
 
         const sellerSummary = buildSellerSummary(analysis);
-        const summaryText = buildDomainSummaryText(sellerSummary);
 
         /* --------------------------------------------------------------
            Final tool output
            -------------------------------------------------------------- */
 
-        return {
-          structured: sellerSummary,
-          summary: summaryText,
-          meta: {
-            analysis_window_days: lookbackDays,
-            advertiser_used_for_linkedin: advertiser,
-            sources: {
-              display_ads: countAds(displayAds),
-              search_ads: countAds(searchAds),
-              youtube_ads: countAds(youtubeAds),
-              video_ads: countAds(videoAdsRaw),
-              linkedin_ads: countAds(linkedInAds),
-              builtwith: builtWith ? "included" : "skipped",
-            },
-          },
-        };
+        // The UI consumes window.openai.toolOutput as AdsSummaryOutput, so the
+        // MCP tools/call response must return the structured summary directly
+        // rather than wrapping it in { structured, summary, meta }.
+        return sellerSummary;
       },
     },
   };
