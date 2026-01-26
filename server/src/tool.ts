@@ -12,10 +12,8 @@ import { buildSellerSummary } from "./summary_builder";
 export type ToolDefinition = {
   name: string;
   description: string;
-  inputSchema: JSONSchema7;
+  inputSchema: Record<string, unknown>;
 };
-
-type JSONSchema7 = Record<string, unknown>;
 
 export type ToolRuntime = {
   definition: ToolDefinition;
@@ -26,7 +24,7 @@ export type ToolRegistry = Record<string, ToolRuntime>;
 
 type ToolErrorCode = "invalid_domain" | "upstream_error";
 
-export type ToolError = {
+type ToolError = {
   error: {
     code: ToolErrorCode;
     message: string;
@@ -34,21 +32,15 @@ export type ToolError = {
   };
 };
 
-export type ToolOutput = ReturnType<typeof buildSellerSummary> | ToolError;
-
 /* ============================================================================
    Constants
    ============================================================================ */
 
 const DEFAULT_LOOKBACK_DAYS = 365;
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
-const BUILTWITH_API_BASE = "https://api.builtwith.com/v21/api.json";
-const DEFAULT_TIMEOUT_MS = 10000;
-const DEFAULT_RETRIES = 2;
-const DEFAULT_RETRY_DELAY_MS = 500;
 
 /* ============================================================================
-   Time helpers (SearchAPI only)
+   Time helpers
    ============================================================================ */
 
 function computeTimePeriod(lookbackDays: number): string {
@@ -56,61 +48,13 @@ function computeTimePeriod(lookbackDays: number): string {
   const from = new Date();
   from.setDate(to.getDate() - lookbackDays);
 
-  const fromStr = from.toISOString().slice(0, 10);
-  const toStr = to.toISOString().slice(0, 10);
-
-  return `${fromStr}..${toStr}`;
-}
-
-function shouldRetryStatus(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
-}
-
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  {
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-    retries = DEFAULT_RETRIES,
-    retryDelayMs = DEFAULT_RETRY_DELAY_MS,
-  }: { timeoutMs?: number; retries?: number; retryDelayMs?: number } = {}
-): Promise<Response> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-
-      if (!response.ok && shouldRetryStatus(response.status)) {
-        lastError = new Error(`Retryable status ${response.status}`);
-      } else {
-        return response;
-      }
-    } catch (error) {
-      lastError =
-        error instanceof Error ? error : new Error("Unknown fetch error");
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (attempt < retries) {
-      await new Promise(resolve =>
-        setTimeout(resolve, retryDelayMs * (attempt + 1))
-      );
-    }
-  }
-
-  throw lastError ?? new Error("Upstream request failed");
+  return `${from.toISOString().slice(0, 10)}..${to
+    .toISOString()
+    .slice(0, 10)}`;
 }
 
 /* ============================================================================
-   Upstream fetchers (NO interpretation here)
+   Upstream fetchers (SearchAPI ONLY)
    ============================================================================ */
 
 async function fetchDisplayAds(domain: string, timePeriod: string) {
@@ -154,28 +98,6 @@ async function fetchNonYouTubeVideoAds(domain: string, timePeriod: string) {
   });
 }
 
-async function fetchBuiltWith(domain: string) {
-  const apiKey = process.env.BUILTWITH_KEY;
-  if (!apiKey) {
-    throw new Error("Missing BUILTWITH_KEY");
-  }
-
-  const url =
-    `${BUILTWITH_API_BASE}` +
-    `?KEY=${apiKey}` +
-    `&LOOKUP=${domain}` +
-    `&NOPII=yes` +
-    `&NOMETA=yes` +
-    `&NOATTR=yes`;
-
-  const res = await fetchWithRetry(url, {});
-  if (!res.ok) {
-    throw new Error(`BuiltWith error: ${res.status}`);
-  }
-
-  return res.json();
-}
-
 /* ============================================================================
    Tool Registration
    ============================================================================ */
@@ -186,7 +108,7 @@ export function registerFairCherTool(): ToolRegistry {
       definition: {
         name: "faircher_domain_ads_summary",
         description:
-          "Returns consolidated advertising intelligence for a domain, including search, display, video, CTV, and advertising infrastructure signals.",
+          "Returns consolidated advertising intelligence for a domain using Google Ads Transparency Center data.",
         inputSchema: {
           type: "object",
           required: ["domain"],
@@ -206,7 +128,7 @@ export function registerFairCherTool(): ToolRegistry {
             typeof args.domain !== "string" ||
             args.domain.trim().length === 0
           ) {
-            return wrapContent(
+            return wrapText(
               buildToolError(
                 "invalid_domain",
                 "Domain must be a valid apex domain.",
@@ -215,15 +137,8 @@ export function registerFairCherTool(): ToolRegistry {
             );
           }
 
-          const lookbackDays = DEFAULT_LOOKBACK_DAYS;
-          const includeBuiltWith = Boolean(process.env.BUILTWITH_KEY);
-
           const domain = normalizeDomain(args.domain);
-          const timePeriod = computeTimePeriod(lookbackDays);
-
-          /* --------------------------------------------------------------
-             Fetch advertising data
-             -------------------------------------------------------------- */
+          const timePeriod = computeTimePeriod(DEFAULT_LOOKBACK_DAYS);
 
           const [
             displayAds,
@@ -237,51 +152,23 @@ export function registerFairCherTool(): ToolRegistry {
             fetchNonYouTubeVideoAds(domain, timePeriod),
           ]);
 
-          /* --------------------------------------------------------------
-             BuiltWith enrichment (EXACTLY ONCE)
-             -------------------------------------------------------------- */
-
-          let infrastructure: unknown | null = null;
-
-          if (includeBuiltWith) {
-            try {
-              infrastructure = await fetchBuiltWith(domain);
-            } catch (error) {
-              console.warn(
-                "BuiltWith enrichment failed; continuing without it",
-                {
-                  domain,
-                  cause:
-                    error instanceof Error ? error.message : "Unknown error",
-                }
-              );
-              infrastructure = null;
-            }
-          }
-
-          /* --------------------------------------------------------------
-             Normalize & analyze
-             -------------------------------------------------------------- */
-
           const ads = [
-            ...displayAds.flatMap(upstream => normalizeAds({ upstream })),
-            ...searchAds.flatMap(upstream => normalizeAds({ upstream })),
-            ...youtubeAds.flatMap(upstream => normalizeAds({ upstream })),
-            ...videoAdsRaw.flatMap(upstream => normalizeAds({ upstream })),
+            ...displayAds.flatMap(u => normalizeAds({ upstream: u })),
+            ...searchAds.flatMap(u => normalizeAds({ upstream: u })),
+            ...youtubeAds.flatMap(u => normalizeAds({ upstream: u })),
+            ...videoAdsRaw.flatMap(u => normalizeAds({ upstream: u })),
           ];
 
           const analysis = analyzeAds({
             domain,
             ads,
-            infrastructure,
+            infrastructure: null,
           });
 
-          const sellerSummary = buildSellerSummary(analysis);
-
-          return wrapContent(sellerSummary);
+          return wrapText(buildSellerSummary(analysis));
         } catch (error) {
           if (error instanceof ValidationError) {
-            return wrapContent(
+            return wrapText(
               buildToolError(
                 "invalid_domain",
                 "Domain must be a valid apex domain.",
@@ -290,16 +177,12 @@ export function registerFairCherTool(): ToolRegistry {
             );
           }
 
-          return wrapContent(
-            buildToolError(
-              "upstream_error",
-              "Upstream ads service unavailable.",
-              {
-                cause:
-                  error instanceof Error ? error.message : "Unknown error",
-                retryable: true,
-              }
-            )
+          return wrapText(
+            buildToolError("upstream_error", "Upstream ads service unavailable.", {
+              cause:
+                error instanceof Error ? error.message : "Unknown error",
+              retryable: true,
+            })
           );
         }
       },
@@ -308,15 +191,15 @@ export function registerFairCherTool(): ToolRegistry {
 }
 
 /* ============================================================================
-   Helpers
+   Output helpers (VALID ChatGPT schema)
    ============================================================================ */
 
-function wrapContent(payload: unknown) {
+function wrapText(payload: unknown) {
   return {
     content: [
       {
-        type: "json",
-        json: payload,
+        type: "text",
+        text: JSON.stringify(payload, null, 2),
       },
     ],
   };
