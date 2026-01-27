@@ -34,14 +34,21 @@ type ToolError = {
 };
 
 /* ============================================================================
-   Constants (PERFORMANCE-SAFE)
+   Constants (PERFORMANCE SAFE)
    ============================================================================ */
 
-const LOOKBACK_DAYS = 120;
+const SNAPSHOT_LOOKBACK_DAYS = 120;
+
+/**
+ * HARD LIMIT:
+ * Only the MOST RECENT creative per format.
+ */
+const MAX_CREATIVES_PER_FORMAT = 1;
+
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
 
 /* ============================================================================
-   Helpers
+   Time helpers
    ============================================================================ */
 
 function computeTimePeriod(days: number): string {
@@ -53,17 +60,24 @@ function computeTimePeriod(days: number): string {
     .slice(0, 10)}`;
 }
 
+/* ============================================================================
+   Fetch helpers
+   ============================================================================ */
+
 function getFetch(): typeof fetch {
   if (typeof globalThis.fetch !== "function") {
-    throw new Error("Fetch unavailable");
+    throw new Error("Fetch API unavailable");
   }
   return globalThis.fetch;
 }
 
 async function fetchOnce(params: Record<string, any>) {
   const url = new URL(SEARCH_API_BASE);
+
   Object.entries(params).forEach(([k, v]) => {
-    if (v != null) url.searchParams.set(k, String(v));
+    if (v !== undefined && v !== null) {
+      url.searchParams.set(k, String(v));
+    }
   });
 
   const res = await getFetch()(url.toString(), {
@@ -73,57 +87,64 @@ async function fetchOnce(params: Record<string, any>) {
     },
   });
 
-  if (!res.ok) throw new Error(`Upstream ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`Upstream error (${res.status})`);
+  }
+
   return res.json();
 }
 
 /* ============================================================================
-   Snapshot Fetch (UNCHANGED)
+   Snapshot fetch (unchanged, cheap)
    ============================================================================ */
 
-async function fetchSnapshot(
+async function fetchSnapshotAds(
   domain: string,
   ad_format: "text" | "image" | "video",
-  period: string
+  timePeriod: string
 ): Promise<UpstreamAdsPayload> {
   return fetchOnce({
     engine: "google_ads_transparency_center",
     domain,
     ad_format,
     num: 40,
-    time_period: period,
+    time_period: timePeriod,
   });
 }
 
 /* ============================================================================
-   Creative Fetch (MOST RECENT ONLY)
+   Creative list fetch (MOST RECENT ONLY)
    ============================================================================ */
 
-type CreativeQuery = { domain?: string; advertiser?: string };
+type CreativeQueryParams = { domain?: string; advertiser?: string };
 
-function resolveQuery(q: string): CreativeQuery {
+function resolveCreativeQuery(query: string): CreativeQueryParams {
   try {
-    return { domain: normalizeDomain(q) };
+    return { domain: normalizeDomain(query) };
   } catch {
-    const t = q.trim();
-    if (!t) throw new ValidationError("Invalid query");
-    return { advertiser: t };
+    const trimmed = query.trim();
+    if (!trimmed) throw new ValidationError("Invalid query");
+    return { advertiser: trimmed };
   }
 }
 
 async function fetchCreativeList(
-  query: CreativeQuery,
+  query: CreativeQueryParams,
   ad_format: "text" | "image" | "video",
-  period: string
+  timePeriod: string
 ): Promise<UpstreamAdsPayload> {
   return fetchOnce({
     engine: "google_ads_transparency_center",
     ...query,
     ad_format,
-    num: 1, // 🔑 MOST RECENT ONLY
-    time_period: period,
+    num: MAX_CREATIVES_PER_FORMAT,
+    time_period: timePeriod,
   });
 }
+
+/* ============================================================================
+   Ad Details (MANDATORY, SINGLE CALL)
+   ============================================================================ */
 
 async function fetchAdDetails(advertiser_id: string, creative_id: string) {
   return fetchOnce({
@@ -133,7 +154,11 @@ async function fetchAdDetails(advertiser_id: string, creative_id: string) {
   });
 }
 
-async function fetchTranscript(videoId: string) {
+/* ============================================================================
+   YouTube Transcript (VIDEO ONLY, CONDITIONAL)
+   ============================================================================ */
+
+async function fetchYouTubeTranscript(videoId: string) {
   return fetchOnce({
     engine: "youtube_transcripts",
     video_id: videoId,
@@ -143,66 +168,67 @@ async function fetchTranscript(videoId: string) {
 }
 
 /* ============================================================================
-   Tool Registry
+   Tool Registration
    ============================================================================ */
 
 export function registerFairCherTool(): ToolRegistry {
   return {
     /* ============================================================
-       SNAPSHOT TOOL
+       TOOL 1: DOMAIN SNAPSHOT
        ============================================================ */
 
     faircher_domain_ads_summary: {
       definition: {
         name: "faircher_domain_ads_summary",
         description:
-          "High-level advertising activity snapshot for seller qualification.",
+          "Returns a lightweight advertising activity snapshot for seller qualification.",
         inputSchema: {
           type: "object",
           required: ["domain"],
-          properties: { domain: { type: "string" } },
+          properties: {
+            domain: { type: "string" },
+          },
         },
       },
 
-      async run({ domain }: { domain: string }) {
+      async run(args: { domain: string }) {
         try {
-          const d = normalizeDomain(domain);
-          const period = computeTimePeriod(LOOKBACK_DAYS);
+          const domain = normalizeDomain(args.domain);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
-          const [s, i, v] = await Promise.all([
-            fetchSnapshot(d, "text", period),
-            fetchSnapshot(d, "image", period),
-            fetchSnapshot(d, "video", period),
+          const [searchRaw, displayRaw, videoRaw] = await Promise.all([
+            fetchSnapshotAds(domain, "text", timePeriod),
+            fetchSnapshotAds(domain, "image", timePeriod),
+            fetchSnapshotAds(domain, "video", timePeriod),
           ]);
 
           const ads = [
-            ...normalizeAds({ upstream: s }),
-            ...normalizeAds({ upstream: i }),
-            ...normalizeAds({ upstream: v }),
+            ...normalizeAds({ upstream: searchRaw }),
+            ...normalizeAds({ upstream: displayRaw }),
+            ...normalizeAds({ upstream: videoRaw }),
           ];
 
+          const analysis = analyzeAds({ domain, ads, infrastructure: null });
+          return wrapText(buildSellerSummary(analysis));
+        } catch (err) {
           return wrapText(
-            buildSellerSummary(
-              analyzeAds({ domain: d, ads, infrastructure: null })
-            )
-          );
-        } catch (e) {
-          return wrapText(
-            buildToolError("upstream_error", "Snapshot failed")
+            buildToolError("upstream_error", "Snapshot unavailable", {
+              cause: err instanceof Error ? err.message : "Unknown",
+            })
           );
         }
       },
     },
 
     /* ============================================================
-       CREATIVE INSIGHTS TOOL (FAST)
+       TOOL 2: CREATIVE ADS INSIGHTS (FAST + SAFE)
        ============================================================ */
 
     faircher_creative_ads_insights: {
       definition: {
         name: "faircher_creative_ads_insights",
         description:
-          "Seller-ready creative insights: CTAs, landing domains, and summarized video messaging.",
+          "Returns seller-ready creative insights including CTAs, landing domains, and summarized video messaging.",
         inputSchema: {
           type: "object",
           required: ["query"],
@@ -216,41 +242,43 @@ export function registerFairCherTool(): ToolRegistry {
         },
       },
 
-      async run({ query, formats }: { query: string; formats?: string[] }) {
+      async run(args: { query: string; formats?: string[] }) {
         try {
-          const f = new Set(formats ?? ["search", "display", "video"]);
-          const q = resolveQuery(query);
-          const period = computeTimePeriod(LOOKBACK_DAYS);
+          const formats = new Set(args.formats ?? ["search", "display", "video"]);
+          const queryParams = resolveCreativeQuery(args.query);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
-          const [s, i, v] = await Promise.all([
-            f.has("search") ? fetchCreativeList(q, "text", period) : undefined,
-            f.has("display") ? fetchCreativeList(q, "image", period) : undefined,
-            f.has("video") ? fetchCreativeList(q, "video", period) : undefined,
+          const [search, display, video] = await Promise.all([
+            formats.has("search")
+              ? fetchCreativeList(queryParams, "text", timePeriod)
+              : undefined,
+            formats.has("display")
+              ? fetchCreativeList(queryParams, "image", timePeriod)
+              : undefined,
+            formats.has("video")
+              ? fetchCreativeList(queryParams, "video", timePeriod)
+              : undefined,
           ]);
 
-          const creatives = await normalizeCreatives({
-            search: s,
-            display: i,
-            video: v,
+          const normalized = await normalizeCreatives({
+            search,
+            display,
+            video,
             fetchAdDetails,
-            fetchTranscript,
+            fetchTranscript: fetchYouTubeTranscript,
           });
 
           return wrapText({
-            query,
-            formats_returned: [...f],
-            totals: {
-              search_ads: creatives.search_ads.length,
-              display_ads: creatives.display_ads.length,
-              video_ads: creatives.video_ads.length,
-            },
-            creatives,
+            query: args.query,
+            creatives: normalized,
             notes:
-              "Insights optimized for fast seller workflows. One top creative per format.",
+              "Insights are curated for sales conversations. Video messaging is summarized from transcript content.",
           });
-        } catch (e) {
+        } catch (err) {
           return wrapText(
-            buildToolError("upstream_error", "Creative insights failed")
+            buildToolError("upstream_error", "Creative insights unavailable", {
+              cause: err instanceof Error ? err.message : "Unknown",
+            })
           );
         }
       },
@@ -263,13 +291,12 @@ export function registerFairCherTool(): ToolRegistry {
    ============================================================================ */
 
 function wrapText(payload: unknown) {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
 }
 
 function buildToolError(
   code: ToolErrorCode,
   message: string,
-  details?: Record<string, unknown>
-): ToolError {
-  return { error: { code, message, ...(details ? { details } : {}) } };
-}
+  details?: Record<string,
