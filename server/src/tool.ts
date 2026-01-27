@@ -165,22 +165,20 @@ function fetchCreativeAds(
   });
 }
 
-async function fetchCreativeDetails(detailsLink?: string, adId?: string) {
-  if (detailsLink) {
-    return fetchOnce({
-      engine: "google_ads_transparency_center",
-      details_link: detailsLink,
-    });
+async function fetchCreativeDetails(detailsLink?: string) {
+  if (!detailsLink) {
+    return {};
   }
 
-  if (adId) {
-    return fetchOnce({
-      engine: "google_ads_transparency_center",
-      ad_id: adId,
-    });
+  const res = await getFetch()(detailsLink, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upstream error (${res.status})`);
   }
 
-  return {};
+  return res.json();
 }
 
 /* ============================================================================
@@ -361,7 +359,7 @@ export function registerFairCherTool(): ToolRegistry {
             display: displayRaw ?? undefined,
             video: videoRaw ?? undefined,
             fetchVideoDetails: creative =>
-              fetchCreativeDetails(creative.details_link, creative.id),
+              fetchCreativeDetails(creative.details_link),
           });
 
           const response = {

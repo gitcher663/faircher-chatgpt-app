@@ -20,9 +20,6 @@ type NormalizeCreativesArgs = {
   fetchVideoDetails: (creative: RawCreative) => Promise<unknown>;
 };
 
-const YOUTUBE_URL_PATTERN =
-  /(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/[^\s"'<>]+/i;
-
 function normalizeDate(value?: string): string | null {
   if (!value) return null;
   const parsed = new Date(value);
@@ -75,33 +72,38 @@ function normalizeBaseCreative(
     days_active: computeDaysActive(firstSeen, lastSeen),
   };
 
-  const creativeUrl = creative.target_domain ?? creative.details_link;
-  if (creativeUrl) {
-    normalized.creative_url = creativeUrl;
+  if (format === "Display Ads") {
+    const imageLink = (creative as { image?: { link?: string } }).image?.link;
+    if (imageLink) {
+      normalized.creative_url = imageLink;
+    }
   }
 
-  if (youtubeUrl) {
+  if (format === "Video Ads" && youtubeUrl) {
     normalized.youtube_url = youtubeUrl;
   }
 
   return normalized;
 }
 
-function extractYouTubeUrl(value: unknown): string | null {
-  const queue: unknown[] = [value];
+function extractYouTubeUrl(details: unknown): string | null {
+  const root =
+    details && typeof details === "object" && "details" in details
+      ? (details as { details?: unknown }).details
+      : details;
 
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (typeof current === "string") {
-      const match = current.match(YOUTUBE_URL_PATTERN);
-      if (match?.[0]) {
-        const url = match[0];
-        return url.startsWith("http") ? url : `https://${url}`;
-      }
-    } else if (Array.isArray(current)) {
-      queue.push(...current);
-    } else if (current && typeof current === "object") {
-      queue.push(...Object.values(current));
+  const candidates = [
+    (root as { video?: { youtube_url?: string } })?.video?.youtube_url,
+    (root as { video?: { url?: string } })?.video?.url,
+    (root as { creative_preview_url?: string })?.creative_preview_url,
+  ];
+
+  for (const value of candidates) {
+    if (
+      typeof value === "string" &&
+      (value.includes("youtube.com") || value.includes("youtu.be"))
+    ) {
+      return value;
     }
   }
 
@@ -131,6 +133,10 @@ async function normalizeVideoCreatives(
   const normalized: NormalizedCreative[] = [];
 
   for (const [index, creative] of creatives.entries()) {
+    if (!creative.details_link) {
+      continue;
+    }
+
     const details = await fetchVideoDetails(creative);
     const youtubeUrl = extractYouTubeUrl(details);
     if (!youtubeUrl) {
