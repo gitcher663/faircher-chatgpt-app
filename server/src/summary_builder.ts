@@ -1,9 +1,15 @@
+/**
+ * summary_builder.ts
+ * ------------------
+ * Snapshot-level seller summary builder.
+ *
+ * IMPORTANT:
+ * - This file intentionally does NOT expose creative data.
+ * - Creative execution lives in faircher_creative_ads_insights.
+ */
+
 export type AdsSummary = {
   domain: string;
-
-  /* ============================================================
-     Advertising Activity Snapshot
-     ============================================================ */
 
   advertising_activity_snapshot: {
     status: "Active" | "Inactive" | "Inactive (Historical Buyer)";
@@ -13,10 +19,6 @@ export type AdsSummary = {
     total_ads_detected: number;
   };
 
-  /* ============================================================
-     Advertising Behavior Profile
-     ============================================================ */
-
   advertising_behavior_profile: {
     advertising_intensity: "Low" | "Moderate" | "High";
     strategy_orientation: "Performance-driven" | "Brand-led" | "Mixed";
@@ -25,10 +27,6 @@ export type AdsSummary = {
     experimentation_level: "Limited" | "Moderate" | "Aggressive";
   };
 
-  /* ============================================================
-     Activity Timeline
-     ============================================================ */
-
   activity_timeline: {
     first_observed: string | null;
     most_recent_activity: string | null;
@@ -36,19 +34,11 @@ export type AdsSummary = {
     always_on_presence: "Yes" | "No";
   };
 
-  /* ============================================================
-     Ad Format Mix
-     ============================================================ */
-
   ad_format_mix: Array<{
     format: "Search Ads" | "Display Ads" | "Video Ads" | "Other Ads";
     count: number;
     share: number;
   }>;
-
-  /* ============================================================
-     Campaign Stability Signals
-     ============================================================ */
 
   campaign_stability_signals: {
     average_ad_lifespan_days: number | null;
@@ -57,19 +47,11 @@ export type AdsSummary = {
     volatility_index: "Low" | "Medium" | "High";
   };
 
-  /* ============================================================
-     Market Investment Tier (REPLACES SCALE + SPEND)
-     ============================================================ */
-
   market_investment_tier: {
     tier: "$" | "$$" | "$$$";
     description: string;
     confidence: "Low" | "Medium" | "High";
   };
-
-  /* ============================================================
-     Sales Interpretation (Seller-Facing)
-     ============================================================ */
 
   sales_interpretation: {
     summary: string;
@@ -78,10 +60,6 @@ export type AdsSummary = {
     outreach_recommendation: string;
   };
 
-  /* ============================================================
-     Data Scope
-     ============================================================ */
-
   data_scope: {
     geography: string;
     lookback_window_days: number;
@@ -89,3 +67,17 @@ export type AdsSummary = {
     disclaimer: string;
   };
 };
+
+/**
+ * buildSellerSummary
+ * ------------------
+ * Converts analyzed ads into a seller-facing snapshot summary.
+ *
+ * NOTE:
+ * - The analysis engine already produces the correct shape.
+ * - This function exists to formalize the contract and
+ *   protect tool.ts from internal refactors.
+ */
+export function buildSellerSummary(analysis: AdsSummary): AdsSummary {
+  return analysis;
+}
