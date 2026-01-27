@@ -34,12 +34,18 @@ type ToolError = {
 };
 
 /* ============================================================================
-   Constants (HARD SAFETY LIMITS)
+   Constants — HARD SAFETY LIMITS (NO API EXPLOSIONS)
    ============================================================================ */
 
 const SNAPSHOT_LOOKBACK_DAYS = 120;
 
-/** HARD CAP — prevents API explosions */
+/**
+ * ABSOLUTE HARD CAP.
+ * This caps:
+ *  - creative list size
+ *  - ad details calls
+ *  - transcript calls
+ */
 const MAX_CREATIVES_PER_FORMAT = 10;
 
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
@@ -92,7 +98,7 @@ async function fetchOnce(params: Record<string, any>) {
 }
 
 /* ============================================================================
-   Snapshot fetchers (UNCHANGED)
+   Snapshot fetchers (UNCHANGED BEHAVIOR)
    ============================================================================ */
 
 async function fetchSnapshotAds(
@@ -110,7 +116,7 @@ async function fetchSnapshotAds(
 }
 
 /* ============================================================================
-   Creative list fetch
+   Creative list fetch (CAPPED)
    ============================================================================ */
 
 type CreativeQueryParams = { domain?: string; advertiser?: string };
@@ -140,7 +146,7 @@ async function fetchCreativeList(
 }
 
 /* ============================================================================
-   Ad Details (MANDATORY, CAPPED)
+   Ad Details (MANDATORY, CAPPED BY LIST SIZE)
    ============================================================================ */
 
 async function fetchAdDetails(advertiser_id: string, creative_id: string) {
@@ -152,7 +158,7 @@ async function fetchAdDetails(advertiser_id: string, creative_id: string) {
 }
 
 /* ============================================================================
-   YouTube Transcript (VIDEO ONLY, POST-VALIDATION)
+   YouTube Transcript (VIDEO ONLY, VALIDATED)
    ============================================================================ */
 
 async function fetchYouTubeTranscript(videoId: string) {
@@ -218,7 +224,7 @@ export function registerFairCherTool(): ToolRegistry {
     },
 
     /* ============================================================
-       TOOL 2: CREATIVE ADS INSIGHTS (SAFE + FINAL)
+       TOOL 2: CREATIVE ADS INSIGHTS (SAFE, FINAL)
        ============================================================ */
 
     faircher_creative_ads_insights: {
@@ -241,7 +247,9 @@ export function registerFairCherTool(): ToolRegistry {
 
       async run(args: { query: string; formats?: string[] }) {
         try {
-          const formats = new Set(args.formats ?? ["search", "display", "video"]);
+          const formats = new Set(
+            args.formats ?? ["search", "display", "video"]
+          );
           const queryParams = resolveCreativeQuery(args.query);
           const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
@@ -257,6 +265,13 @@ export function registerFairCherTool(): ToolRegistry {
               : undefined,
           ]);
 
+          /**
+           * normalizeCreatives is responsible for:
+           * - Calling Ad Details (capped)
+           * - Extracting CTA, domains, creative links
+           * - Validating YouTube presence
+           * - Fetching transcripts ONLY for validated video ads
+           */
           const normalized = await normalizeCreatives({
             search,
             display,
