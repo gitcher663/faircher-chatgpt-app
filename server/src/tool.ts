@@ -35,18 +35,8 @@ type ToolError = {
    Constants
    ============================================================================ */
 
-/**
- * Reduced lookback for SNAPSHOT tool.
- * Creative depth now lives in the creative tool.
- */
 const SNAPSHOT_LOOKBACK_DAYS = 120;
-
-/**
- * Hard cap to avoid excessive API usage.
- * This tool is QUALIFICATION, not exhaustiveness.
- */
 const MAX_ADS_PER_FORMAT = 40;
-
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
 
 /* ============================================================================
@@ -77,9 +67,7 @@ async function fetchOnce(params: Record<string, any>) {
   });
 
   const res = await fetch(url.toString(), {
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
   });
 
   if (!res.ok) {
@@ -90,7 +78,7 @@ async function fetchOnce(params: Record<string, any>) {
 }
 
 /* ============================================================================
-   Snapshot fetchers (NO pagination)
+   Snapshot fetchers
    ============================================================================ */
 
 async function fetchSearchAds(domain: string, timePeriod: string) {
@@ -129,15 +117,11 @@ async function fetchVideoAds(domain: string, timePeriod: string) {
 
 export function registerFairCherTool(): ToolRegistry {
   return {
-    /* ------------------------------------------------------------------
-       TOOL 1: SNAPSHOT / QUALIFICATION (REDUCED SCOPE)
-       ------------------------------------------------------------------ */
-
     faircher_domain_ads_summary: {
       definition: {
         name: "faircher_domain_ads_summary",
         description:
-          "Returns a lightweight advertising activity snapshot for seller qualification. Not a creative-level tool.",
+          "Returns a lightweight advertising activity snapshot for seller qualification.",
         inputSchema: {
           type: "object",
           required: ["domain"],
@@ -152,20 +136,6 @@ export function registerFairCherTool(): ToolRegistry {
 
       async run(args: { domain: string }) {
         try {
-          if (
-            !args ||
-            typeof args.domain !== "string" ||
-            args.domain.trim().length === 0
-          ) {
-            return wrapText(
-              buildToolError(
-                "invalid_domain",
-                "Domain must be a valid apex domain.",
-                { domain: args?.domain }
-              )
-            );
-          }
-
           const domain = normalizeDomain(args.domain);
           const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
@@ -191,70 +161,41 @@ export function registerFairCherTool(): ToolRegistry {
         } catch (error) {
           if (error instanceof ValidationError) {
             return wrapText(
-              buildToolError(
-                "invalid_domain",
-                "Domain must be a valid apex domain.",
-                { domain: args?.domain }
-              )
+              buildToolError("invalid_domain", "Domain must be a valid apex domain.")
             );
           }
 
           return wrapText(
-            buildToolError(
-              "upstream_error",
-              "Upstream ads service unavailable.",
-              {
-                cause:
-                  error instanceof Error ? error.message : "Unknown error",
-                retryable: true,
-              }
-            )
+            buildToolError("upstream_error", "Upstream ads service unavailable.", {
+              retryable: true,
+            })
           );
         }
       },
     },
 
-    /* ------------------------------------------------------------------
-       TOOL 2: CREATIVE INSIGHTS (NEW TOOL – WIRED, INTENTIONALLY STUBBED)
-       ------------------------------------------------------------------ */
-
     faircher_creative_ads_insights: {
       definition: {
         name: "faircher_creative_ads_insights",
         description:
-          "Returns creative-level advertising insights (search, display, and video ads) for an advertiser or domain.",
+          "Returns creative-level advertising insights for an advertiser or domain.",
         inputSchema: {
           type: "object",
           required: ["query"],
           properties: {
-            query: {
-              type: "string",
-              description: "Advertiser keyword or apex domain",
-            },
+            query: { type: "string" },
             formats: {
               type: "array",
-              items: {
-                enum: ["search", "display", "video"],
-              },
-              description: "Optional creative format filter",
+              items: { enum: ["search", "display", "video"] },
             },
           },
         },
       },
 
-      async run(args: { query: string; formats?: string[] }) {
-        /**
-         * Intentionally minimal.
-         * Creative APIs + insight extraction will be added next.
-         */
+      async run(args: { query: string }) {
         return wrapText({
           status: "ready_for_implementation",
-          received: {
-            query: args?.query,
-            formats: args?.formats ?? "all",
-          },
-          note:
-            "This tool is wired correctly and ready for creative-level API integration.",
+          query: args.query,
         });
       },
     },
@@ -262,17 +203,12 @@ export function registerFairCherTool(): ToolRegistry {
 }
 
 /* ============================================================================
-   Output helpers (VALID ChatGPT schema)
+   Output helpers
    ============================================================================ */
 
 function wrapText(payload: unknown) {
   return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(payload, null, 2),
-      },
-    ],
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
   };
 }
 
@@ -282,10 +218,6 @@ function buildToolError(
   details?: Record<string, unknown>
 ): ToolError {
   return {
-    error: {
-      code,
-      message,
-      ...(details ? { details } : {}),
-    },
+    error: { code, message, ...(details ? { details } : {}) },
   };
 }
