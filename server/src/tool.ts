@@ -35,6 +35,7 @@ type ToolError = {
    Constants
    ============================================================================ */
 
+// Snapshot semantics: keep the lookback window intentionally short.
 const SNAPSHOT_LOOKBACK_DAYS = 120;
 const MAX_ADS_PER_FORMAT = 40;
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
@@ -57,6 +58,14 @@ function computeTimePeriod(days: number): string {
    Non-paginated upstream fetcher
    ============================================================================ */
 
+function getFetch(): typeof fetch {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("Fetch API unavailable in this runtime.");
+  }
+
+  return globalThis.fetch;
+}
+
 async function fetchOnce(params: Record<string, any>) {
   const url = new URL(SEARCH_API_BASE);
 
@@ -66,7 +75,7 @@ async function fetchOnce(params: Record<string, any>) {
     }
   });
 
-  const res = await fetch(url.toString(), {
+  const res = await getFetch()(url.toString(), {
     headers: { Accept: "application/json" },
   });
 
