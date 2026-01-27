@@ -34,11 +34,13 @@ type ToolError = {
 };
 
 /* ============================================================================
-   Constants
+   Constants (HARD SAFETY LIMITS)
    ============================================================================ */
 
 const SNAPSHOT_LOOKBACK_DAYS = 120;
-const MAX_ADS_PER_FORMAT = 40;
+
+/** HARD CAP — prevents API explosions */
+const MAX_CREATIVES_PER_FORMAT = 10;
 
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
 
@@ -90,7 +92,7 @@ async function fetchOnce(params: Record<string, any>) {
 }
 
 /* ============================================================================
-   Snapshot fetchers
+   Snapshot fetchers (UNCHANGED)
    ============================================================================ */
 
 async function fetchSnapshotAds(
@@ -102,7 +104,7 @@ async function fetchSnapshotAds(
     engine: "google_ads_transparency_center",
     domain,
     ad_format,
-    num: MAX_ADS_PER_FORMAT,
+    num: 40,
     time_period: timePeriod,
   });
 }
@@ -132,13 +134,13 @@ async function fetchCreativeList(
     engine: "google_ads_transparency_center",
     ...query,
     ad_format,
-    num: MAX_ADS_PER_FORMAT,
+    num: MAX_CREATIVES_PER_FORMAT,
     time_period: timePeriod,
   });
 }
 
 /* ============================================================================
-   Ad Details (MANDATORY)
+   Ad Details (MANDATORY, CAPPED)
    ============================================================================ */
 
 async function fetchAdDetails(advertiser_id: string, creative_id: string) {
@@ -150,15 +152,15 @@ async function fetchAdDetails(advertiser_id: string, creative_id: string) {
 }
 
 /* ============================================================================
-   YouTube Transcript (VIDEO ONLY)
+   YouTube Transcript (VIDEO ONLY, POST-VALIDATION)
    ============================================================================ */
 
 async function fetchYouTubeTranscript(videoId: string) {
   return fetchOnce({
     engine: "youtube_transcripts",
     video_id: videoId,
-    lang: "en",
     only_available: true,
+    lang: "en",
   });
 }
 
@@ -169,7 +171,7 @@ async function fetchYouTubeTranscript(videoId: string) {
 export function registerFairCherTool(): ToolRegistry {
   return {
     /* ============================================================
-       TOOL 1: DOMAIN SNAPSHOT
+       TOOL 1: DOMAIN SNAPSHOT (NO CHANGE)
        ============================================================ */
 
     faircher_domain_ads_summary: {
@@ -216,14 +218,14 @@ export function registerFairCherTool(): ToolRegistry {
     },
 
     /* ============================================================
-       TOOL 2: CREATIVE ADS INSIGHTS (FULLY WIRED)
+       TOOL 2: CREATIVE ADS INSIGHTS (SAFE + FINAL)
        ============================================================ */
 
     faircher_creative_ads_insights: {
       definition: {
         name: "faircher_creative_ads_insights",
         description:
-          "Returns creative-level advertising insights including CTAs, landing domains, and full video transcripts.",
+          "Returns seller-ready creative insights including CTAs, landing domains, and summarized video messaging.",
         inputSchema: {
           type: "object",
           required: ["query"],
@@ -273,7 +275,7 @@ export function registerFairCherTool(): ToolRegistry {
             },
             creatives: normalized,
             notes:
-              "All creatives are sourced from Ad Details API. Video ads include full transcripts when available.",
+              "Insights are curated for sales conversations. Video messaging is summarized from transcript content.",
           });
         } catch (err) {
           return wrapText(
