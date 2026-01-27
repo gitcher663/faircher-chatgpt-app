@@ -1,4 +1,18 @@
-import type { UpstreamAdsPayload } from "./upstream";
+/**
+ * normalize_creatives.ts
+ *
+ * PURPOSE
+ * -------
+ * Normalizes Google Ads Transparency Center *Ad Details* responses
+ * into a unified creative-level model for the Creative Insights tool.
+ *
+ * IMPORTANT RULES (PER API DOCS)
+ * ------------------------------
+ * - Ad Details API is ALWAYS the source of truth
+ * - This module NEVER fetches data
+ * - Video ads are ONLY valid if a YouTube URL exists in variations
+ * - Transcript fetching happens elsewhere
+ */
 
 export type NormalizedCreative = {
   id: string;
@@ -7,18 +21,42 @@ export type NormalizedCreative = {
   first_seen: string;
   last_seen: string;
   days_active: number;
-  creative_url?: string;
+
+  /* Creative payload */
+  headline?: string;
+  description?: string;
+  long_headline?: string;
+  call_to_action?: string;
+  landing_page?: string;
+  image_url?: string;
+
+  /* Video-only */
   youtube_url?: string;
 };
 
-type RawCreative = NonNullable<UpstreamAdsPayload["ad_creatives"]>[number];
+/* ============================================================================
+   Raw Ad Details Shapes (SearchAPI)
+   ============================================================================ */
+
+type AdDetailsResponse = {
+  ad_information?: {
+    format?: "text" | "image" | "video";
+    first_shown_date?: string;
+    last_shown_date?: string;
+    last_shown_datetime?: string;
+  };
+  variations?: Array<Record<string, any>>;
+};
 
 type NormalizeCreativesArgs = {
-  search?: UpstreamAdsPayload;
-  display?: UpstreamAdsPayload;
-  video?: UpstreamAdsPayload;
-  fetchVideoDetails: (creative: RawCreative) => Promise<unknown>;
+  search?: AdDetailsResponse[];
+  display?: AdDetailsResponse[];
+  video?: AdDetailsResponse[];
 };
+
+/* ============================================================================
+   Helpers
+   ============================================================================ */
 
 function normalizeDate(value?: string): string | null {
   if (!value) return null;
@@ -29,160 +67,121 @@ function normalizeDate(value?: string): string | null {
 function computeDaysActive(firstSeen: string, lastSeen: string): number {
   const first = new Date(firstSeen).getTime();
   const last = new Date(lastSeen).getTime();
-  if (Number.isNaN(first) || Number.isNaN(last) || last < first) {
-    return 0;
-  }
-  const diffDays = Math.floor((last - first) / (1000 * 60 * 60 * 24));
-  return diffDays + 1;
+  if (Number.isNaN(first) || Number.isNaN(last) || last < first) return 0;
+  return Math.floor((last - first) / (1000 * 60 * 60 * 24)) + 1;
 }
 
-function buildCreativeId(
-  creative: RawCreative,
-  format: NormalizedCreative["format"],
-  index: number,
-  firstSeen: string
-): string {
-  return (
-    creative.id ??
-    `${format}-${creative.advertiser?.name ?? "unknown"}-${firstSeen}-${index}`
-  );
-}
+function extractYouTubeUrl(variations?: Array<Record<string, any>>): string | null {
+  if (!variations) return null;
 
-function normalizeBaseCreative(
-  creative: RawCreative,
-  format: NormalizedCreative["format"],
-  index: number,
-  youtubeUrl?: string
-): NormalizedCreative | null {
-  const firstSeen = normalizeDate(creative.first_shown_datetime);
-  const lastSeen = normalizeDate(creative.last_shown_datetime);
+  for (const v of variations) {
+    const candidates = [
+      v.video_link,
+      v.video_url,
+      v.video?.url,
+    ];
 
-  if (!firstSeen || !lastSeen) {
-    return null;
-  }
-
-  const id = buildCreativeId(creative, format, index, firstSeen);
-
-  const normalized: NormalizedCreative = {
-    id,
-    format,
-    advertiser_name: creative.advertiser?.name ?? "Unknown Advertiser",
-    first_seen: firstSeen,
-    last_seen: lastSeen,
-    days_active: computeDaysActive(firstSeen, lastSeen),
-  };
-
-  if (format === "Display Ads") {
-    const imageLink = (creative as { image?: { link?: string } }).image?.link;
-    if (imageLink) {
-      normalized.creative_url = imageLink;
-    }
-  }
-
-  if (format === "Video Ads" && youtubeUrl) {
-    normalized.youtube_url = youtubeUrl;
-  }
-
-  return normalized;
-}
-
-function extractYouTubeUrl(details: unknown): string | null {
-  const root =
-    details && typeof details === "object" && "details" in details
-      ? (details as { details?: unknown }).details
-      : details;
-
-  const candidates = [
-    (root as { video?: { youtube_url?: string } })?.video?.youtube_url,
-    (root as { video?: { url?: string } })?.video?.url,
-    (root as { creative_preview_url?: string })?.creative_preview_url,
-  ];
-
-  for (const value of candidates) {
-    if (
-      typeof value === "string" &&
-      (value.includes("youtube.com") || value.includes("youtu.be"))
-    ) {
-      return value;
+    for (const value of candidates) {
+      if (
+        typeof value === "string" &&
+        (value.includes("youtube.com") || value.includes("youtu.be"))
+      ) {
+        return value;
+      }
     }
   }
 
   return null;
 }
 
-function normalizeStandardCreatives(
-  creatives: RawCreative[] | undefined,
-  format: NormalizedCreative["format"]
-): NormalizedCreative[] {
-  if (!creatives) return [];
-  const normalized: NormalizedCreative[] = [];
-  creatives.forEach((creative, index) => {
-    const mapped = normalizeBaseCreative(creative, format, index);
-    if (mapped) {
-      normalized.push(mapped);
-    }
-  });
-  return normalized;
+/* ============================================================================
+   Normalizers
+   ============================================================================ */
+
+function normalizeSearchOrDisplayCreative(
+  details: AdDetailsResponse,
+  format: "Search Ads" | "Display Ads",
+  index: number
+): NormalizedCreative | null {
+  const info = details.ad_information;
+  const variation = details.variations?.[0];
+
+  const firstSeen = normalizeDate(info?.first_shown_date);
+  const lastSeen = normalizeDate(info?.last_shown_date);
+
+  if (!firstSeen || !lastSeen || !variation) return null;
+
+  return {
+    id: `${format}-${firstSeen}-${index}`,
+    format,
+    advertiser_name: variation.advertiser ?? "Unknown Advertiser",
+    first_seen: firstSeen,
+    last_seen: lastSeen,
+    days_active: computeDaysActive(firstSeen, lastSeen),
+
+    headline: variation.title,
+    description: variation.snippet,
+    long_headline: variation.long_headline,
+    call_to_action: variation.call_to_action,
+    landing_page: variation.link,
+    image_url: variation.image,
+  };
 }
 
-async function normalizeVideoCreatives(
-  creatives: RawCreative[] | undefined,
-  fetchVideoDetails: (creative: RawCreative) => Promise<unknown>
-): Promise<NormalizedCreative[]> {
-  if (!creatives) return [];
-  const normalized: NormalizedCreative[] = [];
+function normalizeVideoCreative(
+  details: AdDetailsResponse,
+  index: number
+): NormalizedCreative | null {
+  const info = details.ad_information;
+  const variations = details.variations;
 
-  for (const [index, creative] of creatives.entries()) {
-    if (!creative.details_link) {
-      continue;
-    }
+  const youtubeUrl = extractYouTubeUrl(variations);
+  if (!youtubeUrl) return null;
 
-    const details = await fetchVideoDetails(creative);
-    const youtubeUrl = extractYouTubeUrl(details);
-    if (!youtubeUrl) {
-      continue;
-    }
+  const firstSeen = normalizeDate(info?.first_shown_date);
+  const lastSeen = normalizeDate(info?.last_shown_date);
 
-    const mapped = normalizeBaseCreative(
-      creative,
-      "Video Ads",
-      index,
-      youtubeUrl
-    );
-    if (mapped) {
-      normalized.push(mapped);
-    }
-  }
+  if (!firstSeen || !lastSeen) return null;
 
-  return normalized;
+  return {
+    id: `Video Ads-${firstSeen}-${index}`,
+    format: "Video Ads",
+    advertiser_name: variations?.[0]?.domain ?? "Unknown Advertiser",
+    first_seen: firstSeen,
+    last_seen: lastSeen,
+    days_active: computeDaysActive(firstSeen, lastSeen),
+    youtube_url: youtubeUrl,
+  };
 }
 
-export async function normalizeCreatives({
+/* ============================================================================
+   Public API
+   ============================================================================ */
+
+export function normalizeCreatives({
   search,
   display,
   video,
-  fetchVideoDetails,
-}: NormalizeCreativesArgs): Promise<{
+}: NormalizeCreativesArgs): {
   search_ads: NormalizedCreative[];
   display_ads: NormalizedCreative[];
   video_ads: NormalizedCreative[];
-}> {
-  const searchAds = normalizeStandardCreatives(
-    search?.ad_creatives,
-    "Search Ads"
-  );
-  const displayAds = normalizeStandardCreatives(
-    display?.ad_creatives,
-    "Display Ads"
-  );
-  const videoAds = await normalizeVideoCreatives(
-    video?.ad_creatives,
-    fetchVideoDetails
-  );
+} {
+  const search_ads =
+    search?.map((d, i) => normalizeSearchOrDisplayCreative(d, "Search Ads", i))
+      .filter(Boolean) as NormalizedCreative[] ?? [];
+
+  const display_ads =
+    display?.map((d, i) => normalizeSearchOrDisplayCreative(d, "Display Ads", i))
+      .filter(Boolean) as NormalizedCreative[] ?? [];
+
+  const video_ads =
+    video?.map((d, i) => normalizeVideoCreative(d, i))
+      .filter(Boolean) as NormalizedCreative[] ?? [];
 
   return {
-    search_ads: searchAds,
-    display_ads: displayAds,
-    video_ads: videoAds,
+    search_ads,
+    display_ads,
+    video_ads,
   };
 }
