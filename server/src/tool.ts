@@ -3,6 +3,7 @@ import { ValidationError } from "./errors";
 import { analyzeAds } from "./ads_analysis";
 import { normalizeAds } from "./normalize_ads";
 import { buildSellerSummary } from "./summary_builder";
+import { normalizeCreatives } from "./normalize_creatives";
 
 /* ============================================================================
    Tool Types
@@ -124,6 +125,62 @@ async function fetchVideoAds(domain: string, timePeriod: string) {
     num: MAX_ADS_PER_FORMAT,
     time_period: timePeriod,
   });
+}
+
+/* ============================================================================
+   Creative fetchers (query-based)
+   ============================================================================ */
+
+type CreativeQueryParams = {
+  domain?: string;
+  advertiser?: string;
+};
+
+function resolveCreativeQuery(query: string): CreativeQueryParams {
+  try {
+    return { domain: normalizeDomain(query) };
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        throw new ValidationError("Invalid query input");
+      }
+      return { advertiser: trimmed };
+    }
+    throw error;
+  }
+}
+
+function fetchCreativeAds(
+  queryParams: CreativeQueryParams,
+  adFormat: "text" | "image" | "video",
+  timePeriod: string
+) {
+  return fetchOnce({
+    engine: "google_ads_transparency_center",
+    ...queryParams,
+    ad_format: adFormat,
+    num: MAX_ADS_PER_FORMAT,
+    time_period: timePeriod,
+  });
+}
+
+async function fetchCreativeDetails(detailsLink?: string, adId?: string) {
+  if (detailsLink) {
+    return fetchOnce({
+      engine: "google_ads_transparency_center",
+      details_link: detailsLink,
+    });
+  }
+
+  if (adId) {
+    return fetchOnce({
+      engine: "google_ads_transparency_center",
+      ad_id: adId,
+    });
+  }
+
+  return {};
 }
 
 /* ============================================================================
@@ -259,15 +316,95 @@ export function registerFairCherTool(): ToolRegistry {
          *
          * That logic belongs here, not in snapshot.
          */
-        return wrapText({
-          status: "ready_for_implementation",
-          received: {
-            query: args?.query,
-            formats: args?.formats ?? "all",
-          },
-          note:
-            "Creative APIs and YouTube validation will be implemented next.",
-        });
+        try {
+          if (
+            !args ||
+            typeof args.query !== "string" ||
+            args.query.trim().length === 0
+          ) {
+            throw new ValidationError("Invalid query input");
+          }
+
+          const requestedFormats = args.formats ?? [
+            "search",
+            "display",
+            "video",
+          ];
+
+          const invalidFormats = requestedFormats.filter(
+            format =>
+              format !== "search" && format !== "display" && format !== "video"
+          );
+
+          if (invalidFormats.length > 0) {
+            throw new ValidationError("Invalid formats filter");
+          }
+
+          const formats = new Set(requestedFormats);
+          const queryParams = resolveCreativeQuery(args.query);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
+
+          const [searchRaw, displayRaw, videoRaw] = await Promise.all([
+            formats.has("search")
+              ? fetchCreativeAds(queryParams, "text", timePeriod)
+              : Promise.resolve(null),
+            formats.has("display")
+              ? fetchCreativeAds(queryParams, "image", timePeriod)
+              : Promise.resolve(null),
+            formats.has("video")
+              ? fetchCreativeAds(queryParams, "video", timePeriod)
+              : Promise.resolve(null),
+          ]);
+
+          const normalized = await normalizeCreatives({
+            search: searchRaw ?? undefined,
+            display: displayRaw ?? undefined,
+            video: videoRaw ?? undefined,
+            fetchVideoDetails: creative =>
+              fetchCreativeDetails(creative.details_link, creative.id),
+          });
+
+          const response = {
+            query: args.query,
+            formats_returned: Array.from(formats),
+            totals: {
+              search_ads: normalized.search_ads.length,
+              display_ads: normalized.display_ads.length,
+              video_ads: normalized.video_ads.length,
+            },
+            creatives: {
+              search_ads: normalized.search_ads,
+              display_ads: normalized.display_ads,
+              video_ads: normalized.video_ads,
+            },
+            notes:
+              "Video creatives are returned only when a YouTube URL is present in creative details.",
+          };
+
+          return wrapText(response);
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            return wrapText(
+              buildToolError(
+                "invalid_domain",
+                "Query must be a valid domain or advertiser name.",
+                { query: args?.query, formats: args?.formats }
+              )
+            );
+          }
+
+          return wrapText(
+            buildToolError(
+              "upstream_error",
+              "Upstream ads service unavailable.",
+              {
+                retryable: true,
+                cause:
+                  error instanceof Error ? error.message : "Unknown error",
+              }
+            )
+          );
+        }
       },
     },
   };
