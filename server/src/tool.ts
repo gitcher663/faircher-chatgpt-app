@@ -166,9 +166,7 @@ function fetchCreativeAds(
 }
 
 async function fetchCreativeDetails(detailsLink?: string) {
-  if (!detailsLink) {
-    return {};
-  }
+  if (!detailsLink) return {};
 
   const res = await getFetch()(detailsLink, {
     headers: { Accept: "application/json" },
@@ -227,16 +225,6 @@ export function registerFairCherTool(): ToolRegistry {
             fetchVideoAds(domain, timePeriod),
           ]);
 
-          /**
-           * NOTE:
-           * normalizeAds handles:
-           * - text → Search
-           * - image → Display
-           * - video → Video (metadata only)
-           *
-           * Creative enrichment (YouTube URL validation, etc.)
-           * happens ONLY in the creative tool.
-           */
           const ads = [
             ...normalizeAds({ upstream: searchRaw }),
             ...normalizeAds({ upstream: displayRaw }),
@@ -277,43 +265,38 @@ export function registerFairCherTool(): ToolRegistry {
     },
 
     /* ------------------------------------------------------------------
-       TOOL 2: CREATIVE INSIGHTS (INTENTIONALLY STUBBED)
+       TOOL 2: CREATIVE ADS INSIGHTS (PHASE 1 COMPLETE)
        ------------------------------------------------------------------ */
 
     faircher_creative_ads_insights: {
       definition: {
         name: "faircher_creative_ads_insights",
         description:
-          "Returns creative-level advertising insights for an advertiser or domain. Includes search, display, and validated video creatives.",
+          "Returns creative-level advertising data (search, display, and validated video ads) for a domain or advertiser. Video ads are only included if a YouTube URL is confirmed.",
         inputSchema: {
           type: "object",
           required: ["query"],
           properties: {
             query: {
               type: "string",
-              description: "Advertiser name or apex domain",
+              description:
+                "Apex domain or advertiser name (e.g. example.com or Brand Name).",
             },
             formats: {
               type: "array",
               items: {
+                type: "string",
                 enum: ["search", "display", "video"],
               },
-              description: "Optional creative format filter",
+              description:
+                "Optional list of creative formats to include. Defaults to all.",
             },
           },
+          additionalProperties: false,
         },
       },
 
       async run(args: { query: string; formats?: string[] }) {
-        /**
-         * This tool is WIRED but intentionally minimal.
-         *
-         * Video creatives MUST:
-         * - Resolve to a YouTube URL
-         * - Pass creative-details validation
-         *
-         * That logic belongs here, not in snapshot.
-         */
         try {
           if (
             !args ||
@@ -330,8 +313,7 @@ export function registerFairCherTool(): ToolRegistry {
           ];
 
           const invalidFormats = requestedFormats.filter(
-            format =>
-              format !== "search" && format !== "display" && format !== "video"
+            f => f !== "search" && f !== "display" && f !== "video"
           );
 
           if (invalidFormats.length > 0) {
@@ -345,24 +327,24 @@ export function registerFairCherTool(): ToolRegistry {
           const [searchRaw, displayRaw, videoRaw] = await Promise.all([
             formats.has("search")
               ? fetchCreativeAds(queryParams, "text", timePeriod)
-              : Promise.resolve(null),
+              : Promise.resolve(undefined),
             formats.has("display")
               ? fetchCreativeAds(queryParams, "image", timePeriod)
-              : Promise.resolve(null),
+              : Promise.resolve(undefined),
             formats.has("video")
               ? fetchCreativeAds(queryParams, "video", timePeriod)
-              : Promise.resolve(null),
+              : Promise.resolve(undefined),
           ]);
 
           const normalized = await normalizeCreatives({
-            search: searchRaw ?? undefined,
-            display: displayRaw ?? undefined,
-            video: videoRaw ?? undefined,
+            search: searchRaw,
+            display: displayRaw,
+            video: videoRaw,
             fetchVideoDetails: creative =>
               fetchCreativeDetails(creative.details_link),
           });
 
-          const response = {
+          return wrapText({
             query: args.query,
             formats_returned: Array.from(formats),
             totals: {
@@ -376,10 +358,8 @@ export function registerFairCherTool(): ToolRegistry {
               video_ads: normalized.video_ads,
             },
             notes:
-              "Video creatives are returned only when a YouTube URL is present in creative details.",
-          };
-
-          return wrapText(response);
+              "Video creatives are included only when a YouTube URL is present in creative details.",
+          });
         } catch (error) {
           if (error instanceof ValidationError) {
             return wrapText(
