@@ -1,12 +1,13 @@
 /**
  * summary_builder.ts
  * ------------------
- * Snapshot-level seller summary builder.
+ * Converts AdsAnalysis into a seller-facing AdsSummary snapshot.
  *
- * IMPORTANT:
- * - This file intentionally does NOT expose creative data.
- * - Creative execution lives in faircher_creative_ads_insights.
+ * This is the ONLY place where AdsAnalysis is translated into
+ * a stable, UI-facing contract.
  */
+
+import type { AdsAnalysis } from "./ads_analysis";
 
 export type AdsSummary = {
   domain: string;
@@ -71,13 +72,17 @@ export type AdsSummary = {
 /**
  * buildSellerSummary
  * ------------------
- * Converts analyzed ads into a seller-facing snapshot summary.
+ * Deterministically maps AdsAnalysis → AdsSummary.
  *
  * NOTE:
- * - The analysis engine already produces the correct shape.
- * - This function exists to formalize the contract and
- *   protect tool.ts from internal refactors.
+ * Today this is mostly a structural pass-through because
+ * AdsAnalysis already computes these fields.
+ * This function exists to:
+ * - enforce the boundary
+ * - protect tool.ts from refactors
  */
-export function buildSellerSummary(analysis: AdsSummary): AdsSummary {
-  return analysis;
+export function buildSellerSummary(
+  analysis: AdsAnalysis
+): AdsSummary {
+  return analysis as AdsSummary;
 }
