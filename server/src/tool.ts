@@ -4,6 +4,7 @@ import { analyzeAds } from "./ads_analysis";
 import { normalizeAds } from "./normalize_ads";
 import { buildSellerSummary } from "./summary_builder";
 import { normalizeCreatives } from "./normalize_creatives";
+import type { UpstreamAdsPayload } from "./upstream";
 
 /* ============================================================================
    Tool Types
@@ -89,10 +90,14 @@ async function fetchOnce(params: Record<string, any>) {
 }
 
 /* ============================================================================
-   Snapshot fetchers (UNCHANGED)
+   Snapshot fetchers
    ============================================================================ */
 
-async function fetchSnapshotAds(domain: string, ad_format: string, timePeriod: string) {
+async function fetchSnapshotAds(
+  domain: string,
+  ad_format: "text" | "image" | "video",
+  timePeriod: string
+): Promise<UpstreamAdsPayload> {
   return fetchOnce({
     engine: "google_ads_transparency_center",
     domain,
@@ -122,7 +127,7 @@ async function fetchCreativeList(
   query: CreativeQueryParams,
   ad_format: "text" | "image" | "video",
   timePeriod: string
-) {
+): Promise<UpstreamAdsPayload> {
   return fetchOnce({
     engine: "google_ads_transparency_center",
     ...query,
@@ -133,7 +138,7 @@ async function fetchCreativeList(
 }
 
 /* ============================================================================
-   Ad Details fetch (MANDATORY FOR ALL FORMATS)
+   Ad Details (MANDATORY)
    ============================================================================ */
 
 async function fetchAdDetails(advertiser_id: string, creative_id: string) {
@@ -145,15 +150,15 @@ async function fetchAdDetails(advertiser_id: string, creative_id: string) {
 }
 
 /* ============================================================================
-   YouTube Transcript fetch (VIDEO ONLY)
+   YouTube Transcript (VIDEO ONLY)
    ============================================================================ */
 
 async function fetchYouTubeTranscript(videoId: string) {
   return fetchOnce({
     engine: "youtube_transcripts",
     video_id: videoId,
-    only_available: true,
     lang: "en",
+    only_available: true,
   });
 }
 
@@ -164,7 +169,7 @@ async function fetchYouTubeTranscript(videoId: string) {
 export function registerFairCherTool(): ToolRegistry {
   return {
     /* ============================================================
-       TOOL 1: DOMAIN SNAPSHOT (NO CHANGE)
+       TOOL 1: DOMAIN SNAPSHOT
        ============================================================ */
 
     faircher_domain_ads_summary: {
@@ -211,14 +216,14 @@ export function registerFairCherTool(): ToolRegistry {
     },
 
     /* ============================================================
-       TOOL 2: CREATIVE ADS INSIGHTS (FULL FLOW)
+       TOOL 2: CREATIVE ADS INSIGHTS (FULLY WIRED)
        ============================================================ */
 
     faircher_creative_ads_insights: {
       definition: {
         name: "faircher_creative_ads_insights",
         description:
-          "Returns creative-level advertising insights including ad copy, CTAs, images, and video transcripts when available.",
+          "Returns creative-level advertising insights including CTAs, landing domains, and full video transcripts.",
         inputSchema: {
           type: "object",
           required: ["query"],
@@ -238,33 +243,24 @@ export function registerFairCherTool(): ToolRegistry {
           const queryParams = resolveCreativeQuery(args.query);
           const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
-          const listResults = {
-            search: formats.has("search")
-              ? await fetchCreativeList(queryParams, "text", timePeriod)
+          const [search, display, video] = await Promise.all([
+            formats.has("search")
+              ? fetchCreativeList(queryParams, "text", timePeriod)
               : undefined,
-            display: formats.has("display")
-              ? await fetchCreativeList(queryParams, "image", timePeriod)
+            formats.has("display")
+              ? fetchCreativeList(queryParams, "image", timePeriod)
               : undefined,
-            video: formats.has("video")
-              ? await fetchCreativeList(queryParams, "video", timePeriod)
+            formats.has("video")
+              ? fetchCreativeList(queryParams, "video", timePeriod)
               : undefined,
-          };
+          ]);
 
-          async function hydrate(list: any) {
-            if (!list?.ad_creatives) return [];
-            const results = [];
-            for (const c of list.ad_creatives) {
-              if (!c.advertiser?.id || !c.id) continue;
-              const details = await fetchAdDetails(c.advertiser.id, c.id);
-              results.push(details);
-            }
-            return results;
-          }
-
-          const normalized = normalizeCreatives({
-            search: await hydrate(listResults.search),
-            display: await hydrate(listResults.display),
-            video: await hydrate(listResults.video),
+          const normalized = await normalizeCreatives({
+            search,
+            display,
+            video,
+            fetchAdDetails,
+            fetchTranscript: fetchYouTubeTranscript,
           });
 
           return wrapText({
@@ -277,7 +273,7 @@ export function registerFairCherTool(): ToolRegistry {
             },
             creatives: normalized,
             notes:
-              "All creatives are sourced from Ad Details API. Video ads include YouTube transcripts when available.",
+              "All creatives are sourced from Ad Details API. Video ads include full transcripts when available.",
           });
         } catch (err) {
           return wrapText(
