@@ -1,6 +1,5 @@
 import { normalizeDomain } from "./normalize";
 import { ValidationError } from "./errors";
-import { fetchAllPages } from "./upstream";
 import { analyzeAds } from "./ads_analysis";
 import { normalizeAds } from "./normalize_ads";
 import { buildSellerSummary } from "./summary_builder";
@@ -36,17 +35,28 @@ type ToolError = {
    Constants
    ============================================================================ */
 
-const DEFAULT_LOOKBACK_DAYS = 365;
+/**
+ * Reduced lookback for SNAPSHOT tool.
+ * Creative depth now lives in the creative tool.
+ */
+const SNAPSHOT_LOOKBACK_DAYS = 120;
+
+/**
+ * Hard cap to avoid excessive API usage.
+ * This tool is QUALIFICATION, not exhaustiveness.
+ */
+const MAX_ADS_PER_FORMAT = 40;
+
 const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
 
 /* ============================================================================
    Time helpers
    ============================================================================ */
 
-function computeTimePeriod(lookbackDays: number): string {
+function computeTimePeriod(days: number): string {
   const to = new Date();
   const from = new Date();
-  from.setDate(to.getDate() - lookbackDays);
+  from.setDate(to.getDate() - days);
 
   return `${from.toISOString().slice(0, 10)}..${to
     .toISOString()
@@ -54,46 +64,61 @@ function computeTimePeriod(lookbackDays: number): string {
 }
 
 /* ============================================================================
-   Upstream fetchers (SearchAPI ONLY)
+   Non-paginated upstream fetcher
    ============================================================================ */
 
-async function fetchDisplayAds(domain: string, timePeriod: string) {
-  return fetchAllPages(SEARCH_API_BASE, {
-    engine: "google_ads_transparency_center",
-    domain,
-    ad_format: "image",
-    num: 100,
-    time_period: timePeriod,
+async function fetchOnce(params: Record<string, any>) {
+  const url = new URL(SEARCH_API_BASE);
+
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) {
+      url.searchParams.set(k, String(v));
+    }
   });
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upstream error (${res.status})`);
+  }
+
+  return res.json();
 }
 
+/* ============================================================================
+   Snapshot fetchers (NO pagination)
+   ============================================================================ */
+
 async function fetchSearchAds(domain: string, timePeriod: string) {
-  return fetchAllPages(SEARCH_API_BASE, {
+  return fetchOnce({
     engine: "google_ads_transparency_center",
     domain,
     ad_format: "text",
-    num: 100,
+    num: MAX_ADS_PER_FORMAT,
     time_period: timePeriod,
   });
 }
 
-async function fetchYouTubeAds(domain: string, timePeriod: string) {
-  return fetchAllPages(SEARCH_API_BASE, {
+async function fetchDisplayAds(domain: string, timePeriod: string) {
+  return fetchOnce({
     engine: "google_ads_transparency_center",
     domain,
-    platform: "youtube",
-    ad_format: "video",
-    num: 100,
+    ad_format: "image",
+    num: MAX_ADS_PER_FORMAT,
     time_period: timePeriod,
   });
 }
 
-async function fetchNonYouTubeVideoAds(domain: string, timePeriod: string) {
-  return fetchAllPages(SEARCH_API_BASE, {
+async function fetchVideoAds(domain: string, timePeriod: string) {
+  return fetchOnce({
     engine: "google_ads_transparency_center",
     domain,
     ad_format: "video",
-    num: 100,
+    num: MAX_ADS_PER_FORMAT,
     time_period: timePeriod,
   });
 }
@@ -104,11 +129,15 @@ async function fetchNonYouTubeVideoAds(domain: string, timePeriod: string) {
 
 export function registerFairCherTool(): ToolRegistry {
   return {
+    /* ------------------------------------------------------------------
+       TOOL 1: SNAPSHOT / QUALIFICATION (REDUCED SCOPE)
+       ------------------------------------------------------------------ */
+
     faircher_domain_ads_summary: {
       definition: {
         name: "faircher_domain_ads_summary",
         description:
-          "Returns consolidated advertising intelligence for a domain using Google Ads Transparency Center data.",
+          "Returns a lightweight advertising activity snapshot for seller qualification. Not a creative-level tool.",
         inputSchema: {
           type: "object",
           required: ["domain"],
@@ -138,25 +167,18 @@ export function registerFairCherTool(): ToolRegistry {
           }
 
           const domain = normalizeDomain(args.domain);
-          const timePeriod = computeTimePeriod(DEFAULT_LOOKBACK_DAYS);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
 
-          const [
-            displayAds,
-            searchAds,
-            youtubeAds,
-            videoAdsRaw,
-          ] = await Promise.all([
-            fetchDisplayAds(domain, timePeriod),
+          const [searchRaw, displayRaw, videoRaw] = await Promise.all([
             fetchSearchAds(domain, timePeriod),
-            fetchYouTubeAds(domain, timePeriod),
-            fetchNonYouTubeVideoAds(domain, timePeriod),
+            fetchDisplayAds(domain, timePeriod),
+            fetchVideoAds(domain, timePeriod),
           ]);
 
           const ads = [
-            ...displayAds.flatMap(u => normalizeAds({ upstream: u })),
-            ...searchAds.flatMap(u => normalizeAds({ upstream: u })),
-            ...youtubeAds.flatMap(u => normalizeAds({ upstream: u })),
-            ...videoAdsRaw.flatMap(u => normalizeAds({ upstream: u })),
+            ...normalizeAds({ upstream: searchRaw }),
+            ...normalizeAds({ upstream: displayRaw }),
+            ...normalizeAds({ upstream: videoRaw }),
           ];
 
           const analysis = analyzeAds({
@@ -178,13 +200,62 @@ export function registerFairCherTool(): ToolRegistry {
           }
 
           return wrapText(
-            buildToolError("upstream_error", "Upstream ads service unavailable.", {
-              cause:
-                error instanceof Error ? error.message : "Unknown error",
-              retryable: true,
-            })
+            buildToolError(
+              "upstream_error",
+              "Upstream ads service unavailable.",
+              {
+                cause:
+                  error instanceof Error ? error.message : "Unknown error",
+                retryable: true,
+              }
+            )
           );
         }
+      },
+    },
+
+    /* ------------------------------------------------------------------
+       TOOL 2: CREATIVE INSIGHTS (NEW TOOL – WIRED, INTENTIONALLY STUBBED)
+       ------------------------------------------------------------------ */
+
+    faircher_creative_ads_insights: {
+      definition: {
+        name: "faircher_creative_ads_insights",
+        description:
+          "Returns creative-level advertising insights (search, display, and video ads) for an advertiser or domain.",
+        inputSchema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: {
+              type: "string",
+              description: "Advertiser keyword or apex domain",
+            },
+            formats: {
+              type: "array",
+              items: {
+                enum: ["search", "display", "video"],
+              },
+              description: "Optional creative format filter",
+            },
+          },
+        },
+      },
+
+      async run(args: { query: string; formats?: string[] }) {
+        /**
+         * Intentionally minimal.
+         * Creative APIs + insight extraction will be added next.
+         */
+        return wrapText({
+          status: "ready_for_implementation",
+          received: {
+            query: args?.query,
+            formats: args?.formats ?? "all",
+          },
+          note:
+            "This tool is wired correctly and ready for creative-level API integration.",
+        });
       },
     },
   };
