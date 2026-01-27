@@ -5,9 +5,9 @@
  * is Local, Regional, or National.
  *
  * IMPORTANT:
- * - Ads data must NOT be used here.
- * - This will be powered by Google Knowledge Graph + Google Maps next.
- * - For now, it returns null so summary_builder falls back safely.
+ * - Ads data MUST NOT be used here.
+ * - This will be powered by Google Knowledge Graph + identity signals.
+ * - For now, it returns null so callers can fall back safely.
  */
 
 export type BusinessScale =
@@ -23,7 +23,13 @@ export async function resolveBusinessScale(input: {
   domain?: string;
   brandName?: string;
 }): Promise<BusinessScale> {
-  // STEP 2 STUB
-  // Identity-based logic will be added here next.
+  /**
+   * STEP 2 (future):
+   * - Google Knowledge Graph entity lookup
+   * - Wikipedia / organization signals
+   * - Corporate footprint analysis
+   */
+
+  // STEP 1: Stub — identity resolution not wired yet
   return null;
 }
