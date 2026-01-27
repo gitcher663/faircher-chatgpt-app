@@ -56,29 +56,6 @@ export type AdsSummary = {
     buying_complexity: "Simple" | "Moderate" | "Advanced";
   };
 
-  estimated_monthly_media_spend: {
-    spend_tier:
-      | "$500 – $10,000 / month"
-      | "$10,001 – $20,000 / month"
-      | "$20,001 – $100,000 / month"
-      | "$100,000+ / month";
-  };
-
-  spend_adequacy: {
-    relative_investment_level:
-      | "Underinvested"
-      | "Appropriately Invested"
-      | "Overextended";
-    consistency_vs_scale: "Low" | "Moderate" | "High";
-    growth_headroom: "Limited" | "Moderate" | "Significant";
-  };
-
-  spend_posture: {
-    commitment_level: "Experimental" | "Sustained" | "Aggressive";
-    scaling_pattern: "Flat" | "Seasonal" | "Accelerating";
-    risk_profile: "Conservative" | "Balanced" | "Aggressive";
-  };
-
   sales_interpretation: {
     sell_with_opportunity: string;
     sell_against_opportunity: string;
@@ -104,15 +81,6 @@ const confidenceFromVolume = (totalAds: number): ConfidenceLevel =>
 
 const salesSignalFromVolume = (totalAds: number): SalesSignalStrength =>
   totalAds < 5 ? "Weak" : totalAds < 20 ? "Moderate" : "Strong";
-
-const tierFromSignal = (
-  totalAds: number,
-  hasVideo: boolean
-): AdsSummary["estimated_monthly_media_spend"]["spend_tier"] => {
-  if (totalAds >= 25 || hasVideo) return "$20,001 – $100,000 / month";
-  if (totalAds >= 10) return "$10,001 – $20,000 / month";
-  return "$500 – $10,000 / month";
-};
 
 const intensityFromVolume = (totalAds: number): IntensityLevel =>
   totalAds < 5 ? "Low" : totalAds < 20 ? "Moderate" : "High";
@@ -141,79 +109,6 @@ const orientationFromMix = (
   if (searchShare >= 60) return "Performance-driven";
   if (videoShare >= 40) return "Brand-led";
   return "Mixed";
-};
-
-const scaleFromVolume = (
-  totalAds: number
-): AdsSummary["advertiser_scale"] => {
-  if (totalAds >= 30) {
-    return {
-      scale_classification: "National",
-      geographic_focus: "Nationwide",
-      buying_complexity: "Advanced",
-    };
-  }
-  if (totalAds >= 10) {
-    return {
-      scale_classification: "Regional",
-      geographic_focus: "Multi-market",
-      buying_complexity: "Moderate",
-    };
-  }
-  return {
-    scale_classification: "Local",
-    geographic_focus: "Single-market",
-    buying_complexity: "Simple",
-  };
-};
-
-const adequacyFromSpend = (
-  spendTier: AdsSummary["estimated_monthly_media_spend"]["spend_tier"],
-  intensity: IntensityLevel
-): AdsSummary["spend_adequacy"] => {
-  const alignment =
-    spendTier === "$500 – $10,000 / month" && intensity === "High"
-      ? "Underinvested"
-      : spendTier === "$100,000+ / month" && intensity === "Low"
-      ? "Overextended"
-      : "Appropriately Invested";
-
-  return {
-    relative_investment_level: alignment,
-    consistency_vs_scale:
-      intensity === "High" ? "High" : intensity === "Moderate" ? "Moderate" : "Low",
-    growth_headroom:
-      alignment === "Underinvested"
-        ? "Significant"
-        : alignment === "Overextended"
-        ? "Limited"
-        : "Moderate",
-  };
-};
-
-const postureFromSpend = (
-  spendTier: AdsSummary["estimated_monthly_media_spend"]["spend_tier"],
-  hasVideo: boolean
-): AdsSummary["spend_posture"] => {
-  if (spendTier === "$100,000+ / month") {
-    return {
-      commitment_level: "Aggressive",
-      scaling_pattern: "Accelerating",
-      risk_profile: "Aggressive",
-    };
-  }
-  if (spendTier === "$20,001 – $100,000 / month" || hasVideo) {
-    return {
-      commitment_level: "Sustained",
-      scaling_pattern: "Seasonal",
-      risk_profile: "Balanced",
-    };
-  }
-  return {
-    commitment_level: "Experimental",
-    scaling_pattern: "Flat",
-    risk_profile: "Conservative",
-  };
 };
 
 const averageAdLifespanDays = (ads: AdsAnalysis["ads"]): number | null => {
@@ -245,7 +140,6 @@ export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
       ? "Inactive (Historical Buyer)"
       : "Active";
 
-  const bySurface = analysis.by_surface;
   const byFormat = analysis.by_format;
 
   const searchAds = byFormat.Search;
@@ -260,19 +154,15 @@ export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
       { format: "Video Ads", count: videoAds },
       { format: "Other Ads", count: otherAds },
     ] as const
-  ).map(
-    (item): AdsSummary["ad_format_mix"][number] => ({
-      ...item,
-      share: percent(item.count, totalAds),
-    })
-  );
+  ).map(item => ({
+    ...item,
+    share: percent(item.count, totalAds),
+  }));
 
-  const formatCount = [
-    searchAds,
-    displayAds,
-    videoAds,
-    otherAds,
-  ].filter(count => count > 0).length;
+  const formatCount = [searchAds, displayAds, videoAds, otherAds].filter(
+    count => count > 0
+  ).length;
+
   const hasVideo = videoAds > 0;
   const intensity = intensityFromVolume(totalAds);
   const sophistication = sophisticationFromFormats(formatCount);
@@ -280,17 +170,24 @@ export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
   const searchShare = percent(searchAds, totalAds);
   const videoShare = percent(videoAds, totalAds);
   const strategyOrientation = orientationFromMix(searchShare, videoShare);
-  const spendTier = tierFromSignal(totalAds, hasVideo);
-  const scale = scaleFromVolume(totalAds);
-  const adequacy = adequacyFromSpend(spendTier, intensity);
-  const posture = postureFromSpend(spendTier, hasVideo);
   const averageLifespan = averageAdLifespanDays(analysis.ads);
+
   const alwaysOnPresence =
     status === "Active" &&
     analysis.timeline.ad_lifespan_days !== null &&
     analysis.timeline.ad_lifespan_days >= 180
       ? "Yes"
       : "No";
+
+  /** 🔒 STEP 1 FIX:
+   *  Scale is no longer inferred from ad volume.
+   *  This will be resolved by business identity in the next step.
+   */
+  const scale: AdsSummary["advertiser_scale"] = {
+    scale_classification: "Local",
+    geographic_focus: "Single-market",
+    buying_complexity: "Simple",
+  };
 
   return {
     domain: analysis.domain,
@@ -347,14 +244,6 @@ export function buildSellerSummary(analysis: AdsAnalysis): AdsSummary {
     },
 
     advertiser_scale: scale,
-
-    estimated_monthly_media_spend: {
-      spend_tier: spendTier,
-    },
-
-    spend_adequacy: adequacy,
-
-    spend_posture: posture,
 
     sales_interpretation: {
       sell_with_opportunity:
