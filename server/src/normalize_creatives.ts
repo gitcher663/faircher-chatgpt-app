@@ -1,217 +1,313 @@
+import { normalizeDomain } from "./normalize";
+import { ValidationError } from "./errors";
+import { analyzeAds } from "./ads_analysis";
+import { normalizeAds } from "./normalize_ads";
+import { buildSellerSummary } from "./summary_builder";
+import { normalizeCreatives } from "./normalize_creatives";
 import type { UpstreamAdsPayload } from "./upstream";
 
 /* ============================================================================
-   Public Types
+   Tool Types
    ============================================================================ */
 
-export type NormalizedCreative = {
-  id: string;
+export type ToolDefinition = {
   name: string;
-  format: "Search Ads" | "Display Ads" | "Video Ads";
-  advertiser_name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+};
 
-  first_seen: string;
-  last_seen: string;
-  days_active: number;
+export type ToolRuntime = {
+  definition: ToolDefinition;
+  run: (args: any) => Promise<any>;
+};
 
-  call_to_action?: string;
-  landing_domain?: string;
-  creative_url?: string;
+export type ToolRegistry = Record<string, ToolRuntime>;
 
-  /** Video-only */
-  video_length_seconds?: number;
-  transcript_text?: string;
+type ToolErrorCode = "invalid_domain" | "upstream_error";
+
+type ToolError = {
+  error: {
+    code: ToolErrorCode;
+    message: string;
+    details?: Record<string, unknown>;
+  };
 };
 
 /* ============================================================================
-   Internal Types
+   HARD SAFETY LIMITS
    ============================================================================ */
 
-type RawCreative = NonNullable<UpstreamAdsPayload["ad_creatives"]>[number];
-
-type NormalizeCreativesArgs = {
-  search?: UpstreamAdsPayload;
-  display?: UpstreamAdsPayload;
-  video?: UpstreamAdsPayload;
-
-  fetchAdDetails: (
-    advertiser_id: string,
-    creative_id: string
-  ) => Promise<any>;
-
-  fetchTranscript: (videoId: string) => Promise<any>;
-};
-
-/* ============================================================================
-   Safety Limits (CRITICAL)
-   ============================================================================ */
+const SNAPSHOT_LOOKBACK_DAYS = 120;
 
 /**
- * HARD SAFETY CAPS
- * ----------------
- * Prevents accidental 100+ API call explosions.
+ * ABSOLUTE HARD CAP
+ * -----------------
+ * This is the single most important number in the system.
+ * Prevents runaway Ad Details + Transcript calls.
  */
 const MAX_CREATIVES_PER_FORMAT = 10;
 
+const SEARCH_API_BASE = "https://www.searchapi.io/api/v1/search";
+
 /* ============================================================================
-   Helpers
+   Time helpers
    ============================================================================ */
 
-function normalizeDate(value?: string): string | null {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+function computeTimePeriod(days: number): string {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - days);
+  return `${from.toISOString().slice(0, 10)}..${to
+    .toISOString()
+    .slice(0, 10)}`;
 }
 
-function computeDaysActive(first: string, last: string): number {
-  const f = new Date(first).getTime();
-  const l = new Date(last).getTime();
-  if (Number.isNaN(f) || Number.isNaN(l) || l < f) return 0;
-  return Math.floor((l - f) / 86400000) + 1;
-}
+/* ============================================================================
+   Fetch helpers
+   ============================================================================ */
 
-function extractDomain(url?: string): string | undefined {
-  try {
-    if (!url) return undefined;
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return undefined;
+function getFetch(): typeof fetch {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("Fetch API unavailable");
   }
+  return globalThis.fetch;
 }
 
-function extractYouTubeId(url?: string): string | null {
-  if (!url) return null;
-  const match =
-    url.match(/v=([^&]+)/) ||
-    url.match(/youtu\.be\/([^?]+)/);
-  return match?.[1] ?? null;
-}
+async function fetchOnce(params: Record<string, any>) {
+  const url = new URL(SEARCH_API_BASE);
 
-function summarizeTranscript(transcript: any): string | undefined {
-  if (!Array.isArray(transcript?.transcripts)) return undefined;
-  return transcript.transcripts.map((t: any) => t.text).join(" ");
-}
-
-/* ============================================================================
-   Core Normalization
-   ============================================================================ */
-
-async function normalizeOneCreative(
-  creative: RawCreative,
-  format: NormalizedCreative["format"],
-  index: number,
-  fetchAdDetails: NormalizeCreativesArgs["fetchAdDetails"],
-  fetchTranscript: NormalizeCreativesArgs["fetchTranscript"]
-): Promise<NormalizedCreative | null> {
-  if (!creative.id || !creative.advertiser?.id) return null;
-
-  const firstSeen = normalizeDate(creative.first_shown_datetime);
-  const lastSeen = normalizeDate(creative.last_shown_datetime);
-  if (!firstSeen || !lastSeen) return null;
-
-  const details = await fetchAdDetails(
-    creative.advertiser.id,
-    creative.id
-  );
-
-  const variations = details?.variations ?? [];
-  const primary = variations[0] ?? {};
-
-  const landingUrl =
-    primary.link ||
-    primary.displayed_link ||
-    primary.domain;
-
-  const normalized: NormalizedCreative = {
-    id: creative.id,
-    name:
-      primary.title ||
-      primary.long_headline ||
-      `Creative ${index + 1}`,
-    format,
-    advertiser_name: creative.advertiser.name ?? "Unknown",
-    first_seen: firstSeen,
-    last_seen: lastSeen,
-    days_active: computeDaysActive(firstSeen, lastSeen),
-    call_to_action: primary.call_to_action,
-    landing_domain: extractDomain(landingUrl),
-    creative_url: landingUrl,
-  };
-
-  /* ------------------------------
-     VIDEO: transcript enrichment
-     ------------------------------ */
-  if (format === "Video Ads") {
-    const youtubeUrl =
-      primary.video_link ||
-      primary.thumbnail ||
-      undefined;
-
-    const videoId = extractYouTubeId(youtubeUrl);
-    if (!videoId) return null; // HARD FILTER
-
-    const transcript = await fetchTranscript(videoId);
-    const transcriptText = summarizeTranscript(transcript);
-
-    if (!transcriptText) return null; // HARD FILTER
-
-    normalized.transcript_text = transcriptText;
-    normalized.video_length_seconds =
-      transcript?.transcripts?.reduce(
-        (sum: number, t: any) => sum + (t.duration ?? 0),
-        0
-      ) ?? undefined;
-  }
-
-  return normalized;
-}
-
-/* ============================================================================
-   Public API
-   ============================================================================ */
-
-export async function normalizeCreatives({
-  search,
-  display,
-  video,
-  fetchAdDetails,
-  fetchTranscript,
-}: NormalizeCreativesArgs): Promise<{
-  search_ads: NormalizedCreative[];
-  display_ads: NormalizedCreative[];
-  video_ads: NormalizedCreative[];
-}> {
-  const out = {
-    search_ads: [] as NormalizedCreative[],
-    display_ads: [] as NormalizedCreative[],
-    video_ads: [] as NormalizedCreative[],
-  };
-
-  const process = async (
-    creatives: RawCreative[] | undefined,
-    format: NormalizedCreative["format"]
-  ) => {
-    if (!creatives) return [];
-    const slice = creatives.slice(0, MAX_CREATIVES_PER_FORMAT);
-    const results: NormalizedCreative[] = [];
-
-    for (const [i, c] of slice.entries()) {
-      const normalized = await normalizeOneCreative(
-        c,
-        format,
-        i,
-        fetchAdDetails,
-        fetchTranscript
-      );
-      if (normalized) results.push(normalized);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) {
+      url.searchParams.set(k, String(v));
     }
+  });
 
-    return results;
+  const res = await getFetch()(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${process.env.UPSTREAM_API_KEY}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Upstream error (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/* ============================================================================
+   SNAPSHOT FETCHERS (UNCHANGED, SAFE)
+   ============================================================================ */
+
+async function fetchSnapshotAds(
+  domain: string,
+  ad_format: "text" | "image" | "video",
+  timePeriod: string
+): Promise<UpstreamAdsPayload> {
+  return fetchOnce({
+    engine: "google_ads_transparency_center",
+    domain,
+    ad_format,
+    num: 40,
+    time_period: timePeriod,
+  });
+}
+
+/* ============================================================================
+   CREATIVE LIST FETCH (CAPPED)
+   ============================================================================ */
+
+type CreativeQueryParams = { domain?: string; advertiser?: string };
+
+function resolveCreativeQuery(query: string): CreativeQueryParams {
+  try {
+    return { domain: normalizeDomain(query) };
+  } catch {
+    const trimmed = query.trim();
+    if (!trimmed) throw new ValidationError("Invalid query");
+    return { advertiser: trimmed };
+  }
+}
+
+async function fetchCreativeList(
+  query: CreativeQueryParams,
+  ad_format: "text" | "image" | "video",
+  timePeriod: string
+): Promise<UpstreamAdsPayload> {
+  return fetchOnce({
+    engine: "google_ads_transparency_center",
+    ...query,
+    ad_format,
+    num: MAX_CREATIVES_PER_FORMAT,
+    time_period: timePeriod,
+  });
+}
+
+/* ============================================================================
+   AD DETAILS (MANDATORY, ONE CALL PER CREATIVE)
+   ============================================================================ */
+
+async function fetchAdDetails(advertiser_id: string, creative_id: string) {
+  return fetchOnce({
+    engine: "google_ads_transparency_center_ad_details",
+    advertiser_id,
+    creative_id,
+  });
+}
+
+/* ============================================================================
+   YOUTUBE TRANSCRIPTS (VIDEO ONLY, POST-VALIDATION)
+   ============================================================================ */
+
+async function fetchYouTubeTranscript(videoId: string) {
+  return fetchOnce({
+    engine: "youtube_transcripts",
+    video_id: videoId,
+    only_available: true,
+    lang: "en",
+  });
+}
+
+/* ============================================================================
+   Tool Registration
+   ============================================================================ */
+
+export function registerFairCherTool(): ToolRegistry {
+  return {
+    /* ============================================================
+       TOOL 1: DOMAIN SNAPSHOT (NO CHANGE)
+       ============================================================ */
+
+    faircher_domain_ads_summary: {
+      definition: {
+        name: "faircher_domain_ads_summary",
+        description:
+          "Returns a lightweight advertising activity snapshot for seller qualification.",
+        inputSchema: {
+          type: "object",
+          required: ["domain"],
+          properties: {
+            domain: { type: "string" },
+          },
+        },
+      },
+
+      async run(args: { domain: string }) {
+        try {
+          const domain = normalizeDomain(args.domain);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
+
+          const [searchRaw, displayRaw, videoRaw] = await Promise.all([
+            fetchSnapshotAds(domain, "text", timePeriod),
+            fetchSnapshotAds(domain, "image", timePeriod),
+            fetchSnapshotAds(domain, "video", timePeriod),
+          ]);
+
+          const ads = [
+            ...normalizeAds({ upstream: searchRaw }),
+            ...normalizeAds({ upstream: displayRaw }),
+            ...normalizeAds({ upstream: videoRaw }),
+          ];
+
+          const analysis = analyzeAds({ domain, ads, infrastructure: null });
+          return wrapText(buildSellerSummary(analysis));
+        } catch (err) {
+          return wrapText(
+            buildToolError("upstream_error", "Snapshot unavailable", {
+              cause: err instanceof Error ? err.message : "Unknown",
+            })
+          );
+        }
+      },
+    },
+
+    /* ============================================================
+       TOOL 2: CREATIVE ADS INSIGHTS (SAFE + FINAL)
+       ============================================================ */
+
+    faircher_creative_ads_insights: {
+      definition: {
+        name: "faircher_creative_ads_insights",
+        description:
+          "Returns seller-ready creative insights including CTAs, landing domains, and summarized video messaging.",
+        inputSchema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: { type: "string" },
+            formats: {
+              type: "array",
+              items: { enum: ["search", "display", "video"] },
+            },
+          },
+        },
+      },
+
+      async run(args: { query: string; formats?: string[] }) {
+        try {
+          const formats = new Set(args.formats ?? ["search", "display", "video"]);
+          const queryParams = resolveCreativeQuery(args.query);
+          const timePeriod = computeTimePeriod(SNAPSHOT_LOOKBACK_DAYS);
+
+          const [search, display, video] = await Promise.all([
+            formats.has("search")
+              ? fetchCreativeList(queryParams, "text", timePeriod)
+              : undefined,
+            formats.has("display")
+              ? fetchCreativeList(queryParams, "image", timePeriod)
+              : undefined,
+            formats.has("video")
+              ? fetchCreativeList(queryParams, "video", timePeriod)
+              : undefined,
+          ]);
+
+          const normalized = await normalizeCreatives({
+            search,
+            display,
+            video,
+            fetchAdDetails,
+            fetchTranscript: fetchYouTubeTranscript,
+          });
+
+          return wrapText({
+            query: args.query,
+            formats_returned: Array.from(formats),
+            totals: {
+              search_ads: normalized.search_ads.length,
+              display_ads: normalized.display_ads.length,
+              video_ads: normalized.video_ads.length,
+            },
+            creatives: normalized,
+            notes:
+              "Insights are curated for sales conversations. Video messaging is summarized from transcript content.",
+          });
+        } catch (err) {
+          return wrapText(
+            buildToolError("upstream_error", "Creative insights unavailable", {
+              cause: err instanceof Error ? err.message : "Unknown",
+            })
+          );
+        }
+      },
+    },
   };
+}
 
-  out.search_ads = await process(search?.ad_creatives, "Search Ads");
-  out.display_ads = await process(display?.ad_creatives, "Display Ads");
-  out.video_ads = await process(video?.ad_creatives, "Video Ads");
+/* ============================================================================
+   Output helpers
+   ============================================================================ */
 
-  return out;
+function wrapText(payload: unknown) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function buildToolError(
+  code: ToolErrorCode,
+  message: string,
+  details?: Record<string, unknown>
+): ToolError {
+  return { error: { code, message, ...(details ? { details } : {}) } };
 }
