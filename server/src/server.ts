@@ -126,7 +126,9 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
         minimalTools[tool.definition.name] = {
           name: tool.definition.name,
           description: tool.definition.description,
-          inputSchema: tool.definition.inputSchema
+          inputSchema: tool.definition.inputSchema,
+          annotations: tool.definition.annotations,
+          _meta: tool.definition._meta
         };
       }
 
@@ -153,7 +155,9 @@ async function handleJsonRpc(body: JsonRpcRequest): Promise<RpcReply> {
       const list = Object.values(tools).map(t => ({
         name: t.definition.name,
         description: t.definition.description,
-        inputSchema: t.definition.inputSchema
+        inputSchema: t.definition.inputSchema,
+        annotations: t.definition.annotations,
+        _meta: t.definition._meta
       }));
 
       return reply({ tools: list });

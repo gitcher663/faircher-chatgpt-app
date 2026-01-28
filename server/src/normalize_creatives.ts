@@ -46,29 +46,29 @@ type NormalizeCreativesArgs = {
    Helpers
    ============================================================================ */
 
-function normalizeDate(value?: string): string | null {
+export function normalizeIsoDate(value?: string): string | null {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-function daysBetween(a: string, b: string): number {
+export function daysBetween(a: string, b: string): number {
   const x = new Date(a).getTime();
   const y = new Date(b).getTime();
   if (Number.isNaN(x) || Number.isNaN(y) || y < x) return 0;
   return Math.floor((y - x) / 86400000) + 1;
 }
 
-function extractDomain(url?: string): string | undefined {
+export function extractDomainFromUrl(url?: string | null): string | null {
   try {
-    if (!url) return undefined;
+    if (!url) return null;
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return undefined;
+    return null;
   }
 }
 
-function extractYouTubeId(url?: string): string | null {
+export function extractYouTubeId(url?: string | null): string | null {
   if (!url) return null;
   return (
     url.match(/v=([^&]+)/)?.[1] ??
@@ -94,14 +94,11 @@ async function normalizeOne(
 ): Promise<NormalizedCreative | null> {
   if (!creative.id || !creative.advertiser?.id) return null;
 
-  const first = normalizeDate(creative.first_shown_datetime);
-  const last = normalizeDate(creative.last_shown_datetime);
+  const first = normalizeIsoDate(creative.first_shown_datetime);
+  const last = normalizeIsoDate(creative.last_shown_datetime);
   if (!first || !last) return null;
 
-  const details = await fetchAdDetails(
-    creative.advertiser.id,
-    creative.id
-  );
+  const details = await fetchAdDetails(creative.advertiser.id, creative.id);
 
   const variation = details?.variations?.[0];
   if (!variation) return null;
@@ -113,17 +110,14 @@ async function normalizeOne(
 
   const out: NormalizedCreative = {
     id: creative.id,
-    name:
-      variation.title ||
-      variation.long_headline ||
-      "Unnamed Creative",
+    name: variation.title || variation.long_headline || "Unnamed Creative",
     format,
     advertiser_name: creative.advertiser.name ?? "Unknown",
     first_seen: first,
     last_seen: last,
     days_active: daysBetween(first, last),
     call_to_action: variation.call_to_action,
-    landing_domain: extractDomain(landing),
+    landing_domain: extractDomainFromUrl(landing) ?? undefined,
     creative_url: landing,
   };
 
@@ -131,9 +125,7 @@ async function normalizeOne(
      VIDEO: transcript step
      ------------------------- */
   if (format === "Video Ads") {
-    const ytUrl =
-      variation.video_link ||
-      variation.thumbnail;
+    const ytUrl = variation.video_link || variation.thumbnail;
 
     const videoId = extractYouTubeId(ytUrl);
     if (!videoId) return null;
@@ -168,8 +160,10 @@ export async function normalizeCreatives({
   display_ads: NormalizedCreative[];
   video_ads: NormalizedCreative[];
 }> {
-  const pick = (p?: UpstreamAdsPayload) =>
-    p?.ad_creatives?.[0];
+  const pick = (p?: UpstreamAdsPayload) => p?.ad_creatives?.[0];
+  const isCreative = (
+    creative: NormalizedCreative | null
+  ): creative is NormalizedCreative => Boolean(creative);
 
   return {
     search_ads: pick(search)
@@ -180,7 +174,7 @@ export async function normalizeCreatives({
             fetchAdDetails,
             fetchTranscript
           ),
-        ].filter(Boolean)
+        ].filter(isCreative)
       : [],
 
     display_ads: pick(display)
@@ -191,7 +185,7 @@ export async function normalizeCreatives({
             fetchAdDetails,
             fetchTranscript
           ),
-        ].filter(Boolean)
+        ].filter(isCreative)
       : [],
 
     video_ads: pick(video)
@@ -202,7 +196,7 @@ export async function normalizeCreatives({
             fetchAdDetails,
             fetchTranscript
           ),
-        ].filter(Boolean)
+        ].filter(isCreative)
       : [],
   };
 }

@@ -1,17 +1,15 @@
-import { useEffect, useState } from "react";
 import { AdsSummaryOutput } from "./types";
 import AdsSummaryCard from "./components/AdsSummaryCard";
 import EmptyState from "./components/EmptyState";
+import { useToolOutput } from "./hooks/useOpenAiGlobal";
+import { useWidgetState } from "./hooks/useWidgetState";
 
 export default function App() {
-  const data = (window as any).openai?.toolOutput as AdsSummaryOutput | null;
-  const initialDetails =
-    (window as any).openai?.widgetState?.showDetails ?? true;
-  const [showDetails, setShowDetails] = useState<boolean>(initialDetails);
-
-  useEffect(() => {
-    (window as any).openai?.setWidgetState?.({ showDetails });
-  }, [showDetails]);
+  const data = useToolOutput<AdsSummaryOutput | null>() ?? null;
+  const [widgetState, setWidgetState] = useWidgetState<{
+    showDetails: boolean;
+  }>({ showDetails: true });
+  const showDetails = widgetState?.showDetails ?? true;
 
   if (!data) {
     return null;
@@ -26,7 +24,11 @@ export default function App() {
       <AdsSummaryCard
         data={data}
         showDetails={showDetails}
-        onToggleDetails={() => setShowDetails(prev => !prev)}
+        onToggleDetails={() =>
+          setWidgetState(prev => ({
+            showDetails: !(prev?.showDetails ?? true),
+          }))
+        }
       />
     </div>
   );
