@@ -547,19 +547,22 @@ export function registerFairCherTool(): ToolRegistry {
       definition: {
         name: "faircher_domain_ads_summary",
         description:
-          "Use this when you need a read-only advertising activity snapshot for a domain.",
+          "Use this when you need a cross-format (search/display/video) ads snapshot summary for a single domain over the last ~120 days. Do not use for single most-recent creatives, scheduling/reminders/email drafting, general web research, SEO advice, writing ad copy, budgeting, or campaign management.",
         inputSchema: {
           type: "object",
           required: ["domain"],
           properties: {
             domain: {
               type: "string",
-              description: "Apex/root domain (URLs will be normalized).",
+              description:
+                "Apex/root domain only (URLs allowed and normalized by stripping scheme/www/path). Examples: \"example.com\", \"https://www.example.com/pricing\".",
             },
           },
         },
         annotations: {
           readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: true,
         },
       },
 
@@ -608,19 +611,22 @@ export function registerFairCherTool(): ToolRegistry {
       definition: {
         name: "faircher_search_ad_creative",
         description:
-          "Use this when you need the most recent Search ad creative for a domain or advertiser keyword.",
+          "Use this when you need the single most recent Search ad creative for a domain or advertiser keyword from the last ~60 days (returns at most 1, may be null). Do not use for aggregate summaries across formats (use the domain snapshot), scheduling/reminders/email drafting, general web research, SEO advice, or writing ad copy.",
         inputSchema: {
           type: "object",
           required: ["query"],
           properties: {
             query: {
               type: "string",
-              description: "A domain or advertiser keyword to resolve.",
+              description:
+                "Domain or advertiser keyword; domain-like values are normalized to apex/root, otherwise treated as a keyword and resolved to an advertiser/domain. Examples: \"nike.com\", \"Nike running shoes\".",
             },
           },
         },
         annotations: {
           readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: true,
         },
       },
 
@@ -637,19 +643,22 @@ export function registerFairCherTool(): ToolRegistry {
       definition: {
         name: "faircher_display_ad_creative",
         description:
-          "Use this when you need the most recent Display ad creative for a domain or advertiser keyword.",
+          "Use this when you need the single most recent Display ad creative for a domain or advertiser keyword from the last ~60 days (returns at most 1, may be null). Do not use for aggregate summaries across formats (use the domain snapshot), scheduling/reminders/email drafting, general web research, SEO advice, or writing ad copy.",
         inputSchema: {
           type: "object",
           required: ["query"],
           properties: {
             query: {
               type: "string",
-              description: "A domain or advertiser keyword to resolve.",
+              description:
+                "Domain or advertiser keyword; domain-like values are normalized to apex/root, otherwise treated as a keyword and resolved to an advertiser/domain. Examples: \"adobe.com\", \"creative cloud\".",
             },
           },
         },
         annotations: {
           readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: true,
         },
       },
 
@@ -666,19 +675,22 @@ export function registerFairCherTool(): ToolRegistry {
       definition: {
         name: "faircher_video_ad_creative",
         description:
-          "Use this when you need the most recent Video ad creative for a domain or advertiser keyword.",
+          "Use this when you need the single most recent Video ad creative for a domain or advertiser keyword from the last ~60 days (returns at most 1, may be null). Do not use for aggregate summaries across formats (use the domain snapshot), scheduling/reminders/email drafting, general web research, SEO advice, or writing ad copy.",
         inputSchema: {
           type: "object",
           required: ["query"],
           properties: {
             query: {
               type: "string",
-              description: "A domain or advertiser keyword to resolve.",
+              description:
+                "Domain or advertiser keyword; domain-like values are normalized to apex/root, otherwise treated as a keyword and resolved to an advertiser/domain. Examples: \"spotify.com\", \"music streaming\".",
             },
           },
         },
         annotations: {
           readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: true,
         },
       },
 
