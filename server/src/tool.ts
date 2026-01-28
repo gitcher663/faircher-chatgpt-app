@@ -64,6 +64,7 @@ const TRANSCRIPT_TIMEOUT_MS = 1800;
 const DEFAULT_RETRIES = 2;
 const TRANSCRIPT_RETRIES = 0;
 const BASE_RETRY_DELAY_MS = 400;
+const LENS_TIMEOUT_MS = 6000;
 
 /* ============================================================================
    Time helpers
@@ -205,6 +206,64 @@ async function fetchJson(
   }
 
   return response.json();
+}
+
+async function fetchGoogleLens(url: string, country?: string) {
+  return fetchJson(
+    {
+      engine: "google_lens",
+      search_type: "all",
+      url,
+      country: country ?? "US",
+    },
+    {
+      timeoutMs: LENS_TIMEOUT_MS,
+      retries: 0,
+    }
+  );
+}
+
+function extractLensText(lensPayload: any): string | null {
+  const allowedKeys = new Set([
+    "text",
+    "extracted_text",
+    "ocr",
+    "ocr_text",
+    "text_extracted",
+  ]);
+
+  const queue: any[] = [lensPayload];
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+
+    if (Array.isArray(current)) {
+      current.forEach(item => queue.push(item));
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(current)) {
+      if (allowedKeys.has(key)) {
+        if (typeof value === "string") {
+          const text = compactText(value);
+          if (text) return text;
+        }
+        if (Array.isArray(value)) {
+          const joined = compactText(
+            value.filter(item => typeof item === "string").join(" ")
+          );
+          if (joined) return joined;
+        }
+      }
+
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return null;
 }
 
 /* ============================================================================
@@ -413,6 +472,10 @@ function isFullUrl(value?: string | null): boolean {
   }
 }
 
+function compactText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function extractLandingUrl(variation: any): { landing_url: string | null; landing_domain: string | null } {
   const link = variation?.link ?? null;
   const displayedLink = variation?.displayed_link ?? null;
@@ -436,6 +499,84 @@ function extractLandingUrl(variation: any): { landing_url: string | null; landin
     landing_url: null,
     landing_domain: domain ? domain.replace(/^www\./, "") : null,
   };
+}
+
+function extractIconUrl(creative: any, details: any, variation: any): string | null {
+  const candidates = [
+    creative?.advertiser?.logo,
+    creative?.advertiser?.icon,
+    details?.advertiser?.logo,
+    details?.advertiser?.icon,
+    variation?.icon,
+    variation?.logo,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && isFullUrl(candidate)) {
+      return candidate;
+    }
+    if (candidate && typeof candidate === "object") {
+      const url = (candidate as any).url ?? (candidate as any).image_url;
+      if (typeof url === "string" && isFullUrl(url)) {
+        return url;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractImageUrl(variation: any): string | null {
+  const candidates = [
+    variation?.image_url,
+    variation?.image,
+    variation?.imageUrl,
+    variation?.thumbnail,
+    variation?.thumbnail_url,
+    variation?.thumbnailUrl,
+    variation?.media,
+    variation?.media_url,
+    variation?.mediaUrl,
+  ];
+
+  for (const candidate of candidates) {
+    const url = extractUrlFromValue(candidate);
+    if (url) return url;
+  }
+
+  const images = variation?.images;
+  if (Array.isArray(images)) {
+    for (const image of images) {
+      const url = extractUrlFromValue(image);
+      if (url) return url;
+    }
+  }
+
+  return null;
+}
+
+function extractUrlFromValue(value: any): string | null {
+  if (typeof value === "string") {
+    return isFullUrl(value) ? value : null;
+  }
+
+  if (value && typeof value === "object") {
+    const candidates = [
+      (value as any).url,
+      (value as any).image_url,
+      (value as any).imageUrl,
+      (value as any).thumbnail,
+      (value as any).thumbnail_url,
+      (value as any).thumbnailUrl,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && isFullUrl(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
 }
 
 function buildCreativeOutput(
@@ -506,7 +647,7 @@ async function buildVideoOutput(
     return {
       youtube_video_id,
       transcript_status: "ok",
-      transcript_text: segments.map((t: any) => t.text).join(" "),
+      transcript_text: compactText(segments.map((t: any) => t.text).join(" ")),
       video_length_seconds: segments.reduce(
         (sum: number, t: any) => sum + (t.duration ?? 0),
         0
@@ -531,6 +672,136 @@ async function buildVideoOutput(
       video_length_seconds: null,
     };
   }
+}
+
+function buildSearchAdText(variation: any): string | null {
+  const fields = [
+    variation?.headline,
+    variation?.headline_1,
+    variation?.headline_2,
+    variation?.headline_3,
+    variation?.headline_4,
+    variation?.headline_5,
+    variation?.long_headline,
+    variation?.title,
+    variation?.description,
+    variation?.description_1,
+    variation?.description_2,
+    variation?.description_3,
+  ];
+
+  const text = compactText(
+    fields.filter(value => typeof value === "string" && value.trim()).join(" ")
+  );
+
+  return text || null;
+}
+
+function buildDisplayAdText(variation: any, lensText: string | null): { text: string | null; fromLens: boolean } {
+  if (lensText) {
+    return { text: compactText(lensText), fromLens: true };
+  }
+
+  const fields = [
+    variation?.title,
+    variation?.long_headline,
+    variation?.headline,
+  ];
+
+  const text = compactText(
+    fields.filter(value => typeof value === "string" && value.trim()).join(" ")
+  );
+
+  return { text: text || null, fromLens: false };
+}
+
+function buildVideoAdText(variation: any, transcriptText: string | null): string | null {
+  if (transcriptText) {
+    return compactText(transcriptText);
+  }
+
+  const fields = [
+    variation?.title,
+    variation?.long_headline,
+    variation?.headline,
+    variation?.description,
+  ];
+
+  const text = compactText(
+    fields.filter(value => typeof value === "string" && value.trim()).join(" ")
+  );
+
+  return text || null;
+}
+
+function buildAdsTransparencyLink(advertiserId: string, creativeId: string, regionCode: string | null) {
+  const region = regionCode || "US";
+  return `https://adstransparency.google.com/advertiser/${advertiserId}/creative/${creativeId}?region=${region}`;
+}
+
+function formatCreativeCard({
+  creative,
+  formatLabel,
+  adText,
+  adTextLabel,
+  iconUrl,
+  imageUrl,
+  youtubeLink,
+  transparencyLink,
+  warnings,
+}: {
+  creative: CreativeOutput;
+  formatLabel: string;
+  adText: string | null;
+  adTextLabel: string;
+  iconUrl: string | null;
+  imageUrl: string | null;
+  youtubeLink: string | null;
+  transparencyLink: string | null;
+  warnings: string[];
+}) {
+  const advertiser = creative.advertiser_name ?? "Unknown advertiser";
+  const title = creative.name ?? "Untitled";
+  const lines = [`## ${advertiser} — ${title}`];
+
+  lines.push(`Advertiser: ${advertiser}`);
+  if (formatLabel) {
+    lines.push(`Format: ${formatLabel}`);
+  }
+  if (creative.last_seen) {
+    lines.push(`Last shown: ${creative.last_seen}`);
+  }
+  if (creative.first_seen) {
+    lines.push(`First shown: ${creative.first_seen}`);
+  }
+  if (iconUrl) {
+    lines.push(`Icon: ${iconUrl}`);
+  }
+  if (imageUrl) {
+    lines.push(`Image: ${imageUrl}`);
+  }
+
+  lines.push(`${adTextLabel}: *${adText || "Unavailable."}*`);
+
+  if (youtubeLink) {
+    lines.push(`YouTube: ${youtubeLink}`);
+  }
+  if (transparencyLink) {
+    lines.push(`Ads Transparency: ${transparencyLink}`);
+  }
+  if (warnings.length) {
+    lines.push(`Warnings: ${warnings.join(", ")}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatCreativeEmpty(message: string, warnings: string[]) {
+  const lines = [message];
+  if (warnings.length) {
+    lines.push(`Warnings: ${warnings.join(", ")}`);
+  }
+  return lines.join("\n");
 }
 
 /* ============================================================================
@@ -714,14 +985,7 @@ async function runCreativeTool(
     warnings.push(...resolveWarnings);
 
     if (!resolution) {
-      return wrapText({
-        query: args.query,
-        format,
-        creative: null,
-        video: null,
-        source: "google_ads_transparency_center",
-        warnings,
-      });
+      return wrapText(formatCreativeEmpty(`No advertiser found for "${args.query}".`, warnings));
     }
 
     const timePeriod = computeTimePeriod(CREATIVE_LOOKBACK_DAYS);
@@ -738,27 +1002,13 @@ async function runCreativeTool(
     const creative = listPayload.ad_creatives?.[0];
     if (!creative) {
       warnings.push("no_creatives_found");
-      return wrapText({
-        query: args.query,
-        format,
-        creative: null,
-        video: null,
-        source: "google_ads_transparency_center",
-        warnings,
-      });
+      return wrapText(formatCreativeEmpty(`No creatives found for "${args.query}".`, warnings));
     }
 
     const creativeId = creative.id ?? null;
     if (!creativeId) {
       warnings.push("missing_creative_id");
-      return wrapText({
-        query: args.query,
-        format,
-        creative: null,
-        video: null,
-        source: "google_ads_transparency_center",
-        warnings,
-      });
+      return wrapText(formatCreativeEmpty("Creative unavailable.", warnings));
     }
 
     const advertiserId =
@@ -767,14 +1017,7 @@ async function runCreativeTool(
 
     if (!advertiserId) {
       warnings.push("missing_advertiser_id");
-      return wrapText({
-        query: args.query,
-        format,
-        creative: null,
-        video: null,
-        source: "google_ads_transparency_center",
-        warnings,
-      });
+      return wrapText(formatCreativeEmpty("Creative unavailable.", warnings));
     }
 
     const details = await fetchAdDetails(advertiserId, creativeId);
@@ -782,14 +1025,7 @@ async function runCreativeTool(
 
     if (!variation) {
       warnings.push("missing_ad_details_variation");
-      return wrapText({
-        query: args.query,
-        format,
-        creative: null,
-        video: null,
-        source: "google_ads_transparency_center",
-        warnings,
-      });
+      return wrapText(formatCreativeEmpty("Creative details unavailable.", warnings));
     }
 
     const creativeOutput = buildCreativeOutput(
@@ -801,28 +1037,68 @@ async function runCreativeTool(
 
     const videoOutput =
       format === "video" ? await buildVideoOutput(variation, warnings) : null;
+    const regionCode =
+      details?.ad_information?.regions?.[0]?.code ?? null;
+    const iconUrl = extractIconUrl(creative, details, variation);
+    const transparencyLink = buildAdsTransparencyLink(advertiserId, creativeId, regionCode);
+    let imageUrl: string | null = null;
+    let lensText: string | null = null;
 
-    return wrapText({
-      query: args.query,
-      format,
+    if (format === "display") {
+      imageUrl = extractImageUrl(variation);
+      if (imageUrl) {
+        try {
+          const lensPayload = await fetchGoogleLens(imageUrl, regionCode ?? undefined);
+          lensText = extractLensText(lensPayload);
+          if (!lensText) {
+            warnings.push("lens_no_text");
+          }
+        } catch (error) {
+          warnings.push("lens_unavailable");
+        }
+      }
+    }
+
+    const adTextData =
+      format === "search"
+        ? { text: buildSearchAdText(variation), fromLens: false }
+        : format === "display"
+          ? buildDisplayAdText(variation, lensText)
+          : { text: buildVideoAdText(variation, videoOutput?.transcript_text ?? null), fromLens: false };
+
+    const adTextLabel = adTextData.fromLens
+      ? "Ad text (best-effort, Lens)"
+      : "Ad text";
+
+    const youtubeLink =
+      format === "video"
+        ? (typeof variation?.video_link === "string" && isFullUrl(variation.video_link)
+          ? variation.video_link
+          : videoOutput?.youtube_video_id
+            ? `https://www.youtube.com/watch?v=${videoOutput.youtube_video_id}`
+            : null)
+        : null;
+
+    const card = formatCreativeCard({
       creative: creativeOutput,
-      video: videoOutput,
-      source: "google_ads_transparency_center",
+      formatLabel,
+      adText: adTextData.text,
+      adTextLabel,
+      iconUrl,
+      imageUrl,
+      youtubeLink,
+      transparencyLink,
       warnings,
     });
+
+    return wrapText(card);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return wrapText(
-        buildToolError("invalid_query", err.message, {
-          query: args.query,
-        })
-      );
+      return wrapText(`Error: ${err.message}`);
     }
 
     return wrapText(
-      buildToolError("upstream_error", "Creative fetch unavailable", {
-        cause: err instanceof Error ? err.message : "Unknown",
-      })
+      `Error: Creative fetch unavailable. ${err instanceof Error ? err.message : "Unknown"}`
     );
   }
 }
@@ -832,6 +1108,12 @@ async function runCreativeTool(
    ============================================================================ */
 
 function wrapText(payload: unknown) {
+  if (typeof payload === "string") {
+    return {
+      content: [{ type: "text", text: payload }],
+    };
+  }
+
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
   };
