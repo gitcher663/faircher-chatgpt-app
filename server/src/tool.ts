@@ -293,15 +293,272 @@ type CreativeResolution =
   | { kind: "advertiser"; advertiser_id: string; advertiser_name: string | null };
 
 type AdvertiserSearchResponse = {
-  advertisers?: Array<{ id?: string; name?: string }>;
-  domains?: Array<{ name?: string }>;
+  advertisers?: Array<Record<string, unknown>>;
+  domains?: Array<Record<string, unknown> | string>;
 };
 
-async function fetchAdvertiserSearch(keyword: string): Promise<AdvertiserSearchResponse> {
+async function fetchAdvertiserSearch(
+  keyword: string,
+  region?: string
+): Promise<AdvertiserSearchResponse> {
   return fetchJson({
     engine: "google_ads_transparency_center_advertiser_search",
     q: keyword,
+    region,
   });
+}
+
+function normalizeAdvertiserId(advertiser: Record<string, unknown>) {
+  return (
+    advertiser.id ??
+    advertiser.advertiser_id ??
+    advertiser.advertiserId ??
+    null
+  );
+}
+
+function normalizeAdvertiserName(advertiser: Record<string, unknown>) {
+  return (
+    advertiser.name ??
+    advertiser.advertiser_name ??
+    advertiser.advertiserName ??
+    null
+  );
+}
+
+function normalizeDomainName(domain: Record<string, unknown> | string) {
+  if (typeof domain === "string") return domain;
+  return (
+    (domain as { name?: unknown }).name ??
+    (domain as { domain?: unknown }).domain ??
+    (domain as { website?: unknown }).website ??
+    null
+  );
+}
+
+type AdvertiserCandidate = {
+  name: string;
+  advertiser_id: string;
+  region: string | null;
+  ads_count: { lower: number | null; upper: number | null };
+  is_verified: boolean;
+};
+
+type DomainCandidate = {
+  domain: string;
+};
+
+type AdvertiserRecommendation = {
+  needs_clarification: boolean;
+  recommended_domain: string | null;
+  recommended_advertiser_id: string | null;
+  options: Array<{ type: "domain" | "advertiser"; label: string; value: string }>;
+  clarification_prompt: string | null;
+};
+
+function parseNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed) && Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeAdsCount(raw: unknown): { lower: number | null; upper: number | null } {
+  if (raw === null || raw === undefined) {
+    return { lower: null, upper: null };
+  }
+
+  if (typeof raw === "number" || typeof raw === "string") {
+    const value = parseNumber(raw);
+    return { lower: value, upper: value };
+  }
+
+  if (typeof raw === "object") {
+    const record = raw as Record<string, unknown>;
+    const lower = parseNumber(
+      record.lower ??
+        record.lower_bound ??
+        record.min ??
+        record.minimum ??
+        record.count
+    );
+    const upper = parseNumber(
+      record.upper ??
+        record.upper_bound ??
+        record.max ??
+        record.maximum ??
+        record.max_value ??
+        record.count
+    );
+    return { lower, upper };
+  }
+
+  return { lower: null, upper: null };
+}
+
+function normalizeAdvertiserCandidates(payload: AdvertiserSearchResponse) {
+  const advertisersRaw = Array.isArray(payload.advertisers) ? payload.advertisers : [];
+  const domainsRaw = Array.isArray(payload.domains) ? payload.domains : [];
+  const advertisers: AdvertiserCandidate[] = [];
+  const domains: DomainCandidate[] = [];
+
+  for (const advertiser of advertisersRaw) {
+    if (!advertiser || typeof advertiser !== "object") continue;
+    const advertiserId = normalizeAdvertiserId(advertiser);
+    const advertiserName = normalizeAdvertiserName(advertiser);
+    if (!advertiserId || typeof advertiserId !== "string") continue;
+    const region =
+      (advertiser as { region?: unknown }).region ??
+      (advertiser as { country?: unknown }).country ??
+      (advertiser as { region_code?: unknown }).region_code ??
+      null;
+    const adsCount = normalizeAdsCount((advertiser as { ads_count?: unknown }).ads_count);
+    const isVerifiedRaw =
+      (advertiser as { is_verified?: unknown }).is_verified ??
+      (advertiser as { verified?: unknown }).verified ??
+      false;
+    const is_verified =
+      typeof isVerifiedRaw === "boolean"
+        ? isVerifiedRaw
+        : typeof isVerifiedRaw === "string"
+          ? isVerifiedRaw.toLowerCase() === "true"
+          : Boolean(isVerifiedRaw);
+
+    advertisers.push({
+      name: typeof advertiserName === "string" ? advertiserName : "Unknown advertiser",
+      advertiser_id: advertiserId,
+      region: typeof region === "string" ? region : null,
+      ads_count: adsCount,
+      is_verified,
+    });
+  }
+
+  const seenDomains = new Set<string>();
+  for (const domain of domainsRaw) {
+    const name = normalizeDomainName(domain);
+    if (typeof name !== "string") continue;
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seenDomains.has(key)) continue;
+    seenDomains.add(key);
+    domains.push({ domain: trimmed });
+  }
+
+  return { advertisers, domains };
+}
+
+function buildClarificationOptions(
+  advertisers: AdvertiserCandidate[],
+  domains: DomainCandidate[]
+) {
+  const options: AdvertiserRecommendation["options"] = [];
+
+  advertisers.slice(0, 5).forEach(advertiser => {
+    options.push({
+      type: "advertiser",
+      label: `${advertiser.name} (${advertiser.advertiser_id})`,
+      value: advertiser.advertiser_id,
+    });
+  });
+
+  domains.slice(0, 5).forEach(domain => {
+    options.push({
+      type: "domain",
+      label: domain.domain,
+      value: domain.domain,
+    });
+  });
+
+  return options;
+}
+
+function extractNameTokens(name: string) {
+  const tokens = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+
+  const filtered = tokens.filter(token => token.length > 2);
+  return filtered.length ? filtered : tokens;
+}
+
+function findMatchingDomain(domains: DomainCandidate[], advertiserName: string | null) {
+  if (!advertiserName) return null;
+  const tokens = extractNameTokens(advertiserName);
+  if (!tokens.length) return null;
+  for (const domain of domains) {
+    const lowerDomain = domain.domain.toLowerCase();
+    if (tokens.some(token => lowerDomain.includes(token))) {
+      return domain.domain;
+    }
+  }
+  return null;
+}
+
+function getUpperCount(adsCount: { lower: number | null; upper: number | null }) {
+  return adsCount.upper ?? adsCount.lower ?? null;
+}
+
+function buildAdvertiserRecommendation({
+  query,
+  advertisers,
+  domains,
+}: {
+  query: string;
+  advertisers: AdvertiserCandidate[];
+  domains: DomainCandidate[];
+}): AdvertiserRecommendation {
+  if (domains.length === 1) {
+    return {
+      needs_clarification: false,
+      recommended_domain: domains[0].domain,
+      recommended_advertiser_id: null,
+      options: [],
+      clarification_prompt: null,
+    };
+  }
+
+  const topAdvertiser = advertisers[0] ?? null;
+  if (topAdvertiser?.is_verified) {
+    const topUpper = getUpperCount(topAdvertiser.ads_count);
+    const otherUppers = advertisers
+      .slice(1)
+      .map(advertiser => getUpperCount(advertiser.ads_count))
+      .filter((value): value is number => typeof value === "number");
+    const nextUpper = otherUppers.length ? Math.max(...otherUppers) : null;
+    const isClearlyHighest =
+      typeof topUpper === "number" &&
+      (nextUpper === null || topUpper >= 2 * nextUpper);
+    if (isClearlyHighest) {
+      const matchingDomain = findMatchingDomain(domains, topAdvertiser.name);
+      if (matchingDomain) {
+        return {
+          needs_clarification: false,
+          recommended_domain: matchingDomain,
+          recommended_advertiser_id: topAdvertiser.advertiser_id,
+          options: [],
+          clarification_prompt: null,
+        };
+      }
+    }
+  }
+
+  return {
+    needs_clarification: true,
+    recommended_domain: null,
+    recommended_advertiser_id: null,
+    options: buildClarificationOptions(advertisers, domains),
+    clarification_prompt: `Which advertiser or domain should I use for "${query}"?`,
+  };
 }
 
 async function resolveCreativeQuery(
@@ -319,20 +576,29 @@ async function resolveCreativeQuery(
     const search = await fetchAdvertiserSearch(trimmed);
     const advertiser = search.advertisers?.[0];
     const domain = search.domains?.[0];
+    const advertiserId =
+      advertiser && typeof advertiser === "object"
+        ? normalizeAdvertiserId(advertiser as Record<string, unknown>)
+        : null;
+    const advertiserName =
+      advertiser && typeof advertiser === "object"
+        ? normalizeAdvertiserName(advertiser as Record<string, unknown>)
+        : null;
+    const domainName = domain ? normalizeDomainName(domain) : null;
 
-    if (advertiser?.id) {
+    if (advertiserId) {
       return {
         resolution: {
           kind: "advertiser",
-          advertiser_id: advertiser.id,
-          advertiser_name: advertiser.name ?? null,
+          advertiser_id: advertiserId,
+          advertiser_name: typeof advertiserName === "string" ? advertiserName : null,
         },
         warnings,
       };
     }
 
-    if (domain?.name) {
-      return { resolution: { kind: "domain", domain: domain.name }, warnings };
+    if (typeof domainName === "string") {
+      return { resolution: { kind: "domain", domain: domainName }, warnings };
     }
 
     warnings.push("advertiser_not_found");
@@ -811,6 +1077,76 @@ function formatCreativeEmpty(message: string, warnings: string[]) {
 export function registerFairCherTool(): ToolRegistry {
   return {
     /* ============================================================
+       TOOL 0: ADVERTISER RESOLUTION
+       ============================================================ */
+
+    faircher_resolve_advertiser: {
+      definition: {
+        name: "faircher_resolve_advertiser",
+        description:
+          "Use this when the user gives a business/brand name (not a domain) and you need candidate advertisers/domains from Google Ads Transparency Center. Do not use when a valid apex domain is already provided.",
+        inputSchema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: {
+              type: "string",
+              description:
+                "Business or brand keyword (not a domain). Examples: \"tesla\", \"midas\".",
+            },
+            region: {
+              type: "string",
+              description: "Region code such as \"US\" or \"CA\".",
+            },
+          },
+        },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: true,
+        },
+      },
+
+      async run(args: { query: string; region?: string }) {
+        const warnings: string[] = [];
+        const query = args.query?.trim();
+        if (!query) {
+          return wrapJson(buildToolError("invalid_query", "Query is required."));
+        }
+
+        try {
+          const payload = await fetchAdvertiserSearch(query, args.region);
+          const { advertisers, domains } = normalizeAdvertiserCandidates(payload);
+
+          if (!advertisers.length && !domains.length) {
+            warnings.push("no_candidates_found");
+          }
+
+          const recommendation = buildAdvertiserRecommendation({
+            query,
+            advertisers,
+            domains,
+          });
+
+          return wrapJson({
+            query,
+            region: args.region ?? "anywhere",
+            advertisers,
+            domains,
+            recommendation,
+            warnings,
+          });
+        } catch (error) {
+          return wrapJson(
+            buildToolError("upstream_error", "Advertiser search unavailable", {
+              cause: error instanceof Error ? error.message : "Unknown",
+            })
+          );
+        }
+      },
+    },
+
+    /* ============================================================
        TOOL 1: DOMAIN SNAPSHOT
        ============================================================ */
 
@@ -1116,6 +1452,12 @@ function wrapText(payload: unknown) {
 
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function wrapJson(payload: unknown) {
+  return {
+    content: [{ type: "json", json: payload }],
   };
 }
 
