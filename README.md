@@ -21,3 +21,7 @@ npm --prefix server install
 npm --prefix ui run build
 npm --prefix server run build
 ```
+
+## Troubleshooting
+
+- [GitHub conflicts and MCP reconnects](docs/troubleshooting-github.md)

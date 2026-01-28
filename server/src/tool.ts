@@ -308,22 +308,32 @@ async function fetchAdvertiserSearch(
   });
 }
 
-function normalizeAdvertiserId(advertiser: Record<string, unknown>) {
-  return (
+function normalizeAdvertiserId(advertiser: Record<string, unknown>): string | null {
+  const candidate =
     advertiser.id ??
     advertiser.advertiser_id ??
     advertiser.advertiserId ??
-    null
-  );
+    null;
+
+  if (typeof candidate === "string") {
+    return candidate;
+  }
+
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    return String(candidate);
+  }
+
+  return null;
 }
 
-function normalizeAdvertiserName(advertiser: Record<string, unknown>) {
-  return (
+function normalizeAdvertiserName(advertiser: Record<string, unknown>): string | null {
+  const candidate =
     advertiser.name ??
     advertiser.advertiser_name ??
     advertiser.advertiserName ??
-    null
-  );
+    null;
+
+  return typeof candidate === "string" ? candidate : null;
 }
 
 function normalizeDomainName(domain: Record<string, unknown> | string) {
