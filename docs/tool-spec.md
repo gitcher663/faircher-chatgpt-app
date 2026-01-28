@@ -26,7 +26,7 @@ Validation and normalization rules:
 ## Output Schema — Advertising Activity Summary (Seller View)
 
 The MCP server returns structured JSON matching the shared schema in
-`server/src/types.ts` and `ui/src/types.ts`.
+`server/src/summary_builder.ts` and `ui/src/types.ts`.
 
 The response is deterministic, does **not** expose advertiser or creative data, and is valid even
 when no ads are found. All signals are scoped to the last 365 days in the United States.
@@ -144,6 +144,165 @@ Returned when upstream data sources fail or return invalid data.
     "message": "Upstream ads service unavailable.",
     "details": {
       "retryable": true
+    }
+  }
+}
+```
+
+## Creative tools (Search, Display, Video)
+
+These tools return the single most recent creative per format. Outputs are extraction-only (no insights or speculation). All fields are sourced directly from upstream payloads. Missing fields are returned as `null` with warnings where relevant.
+
+### `faircher_search_ad_creative`
+
+**Input schema**
+
+```json
+{
+  "query": "string"
+}
+```
+
+**Output schema**
+
+```json
+{
+  "query": "string",
+  "format": "search",
+  "creative": {
+    "id": "string | null",
+    "name": "string | null",
+    "ad_format": "Search Ads",
+    "advertiser_name": "string | null",
+    "first_seen": "string | null",
+    "last_seen": "string | null",
+    "days_active": "number | null",
+    "call_to_action": "string | null",
+    "landing_url": "string | null",
+    "landing_domain": "string | null"
+  },
+  "video": null,
+  "source": "google_ads_transparency_center",
+  "warnings": ["string"]
+}
+```
+
+**Example JSON-RPC call**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "search-creative-1",
+  "method": "tools/call",
+  "params": {
+    "name": "faircher_search_ad_creative",
+    "arguments": {
+      "query": "example.com"
+    }
+  }
+}
+```
+
+### `faircher_display_ad_creative`
+
+**Input schema**
+
+```json
+{
+  "query": "string"
+}
+```
+
+**Output schema**
+
+```json
+{
+  "query": "string",
+  "format": "display",
+  "creative": {
+    "id": "string | null",
+    "name": "string | null",
+    "ad_format": "Display Ads",
+    "advertiser_name": "string | null",
+    "first_seen": "string | null",
+    "last_seen": "string | null",
+    "days_active": "number | null",
+    "call_to_action": "string | null",
+    "landing_url": "string | null",
+    "landing_domain": "string | null"
+  },
+  "video": null,
+  "source": "google_ads_transparency_center",
+  "warnings": ["string"]
+}
+```
+
+**Example JSON-RPC call**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "display-creative-1",
+  "method": "tools/call",
+  "params": {
+    "name": "faircher_display_ad_creative",
+    "arguments": {
+      "query": "acme apparel"
+    }
+  }
+}
+```
+
+### `faircher_video_ad_creative`
+
+**Input schema**
+
+```json
+{
+  "query": "string"
+}
+```
+
+**Output schema**
+
+```json
+{
+  "query": "string",
+  "format": "video",
+  "creative": {
+    "id": "string | null",
+    "name": "string | null",
+    "ad_format": "Video Ads",
+    "advertiser_name": "string | null",
+    "first_seen": "string | null",
+    "last_seen": "string | null",
+    "days_active": "number | null",
+    "call_to_action": "string | null",
+    "landing_url": "string | null",
+    "landing_domain": "string | null"
+  },
+  "video": {
+    "youtube_video_id": "string | null",
+    "transcript_status": "ok | unavailable | timeout",
+    "transcript_text": "string | null",
+    "video_length_seconds": "number | null"
+  },
+  "source": "google_ads_transparency_center",
+  "warnings": ["string"]
+}
+```
+
+**Example JSON-RPC call**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "video-creative-1",
+  "method": "tools/call",
+  "params": {
+    "name": "faircher_video_ad_creative",
+    "arguments": {
+      "query": "example.com"
     }
   }
 }
